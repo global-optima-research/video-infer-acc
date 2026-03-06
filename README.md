@@ -105,6 +105,10 @@
 
 > 详细 GPU 对比、FPGA 技术原理、移动端部署、服务框架选型、成本决策分析见 [docs/06-hardware-deployment.md](docs/06-hardware-deployment.md)
 
+## 技术全景图
+
+详细的全栈加速架构图、正交叠加关系、方法图谱、场景选型矩阵、成熟度×加速比矩阵、技术栈组合推荐及时间线见 **[docs/panorama.md](docs/panorama.md)**
+
 ## 框架对比
 
 - [FastGen vs FastVideo 对比分析](docs/fastgen-vs-fastvideo.md) — 工程落地选 FastVideo，蒸馏研究选 FastGen，极致性能两者组合

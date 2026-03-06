@@ -109,6 +109,19 @@
 
 详细的全栈加速架构图、正交叠加关系、方法图谱、场景选型矩阵、成熟度×加速比矩阵、技术栈组合推荐及时间线见 **[docs/panorama.md](docs/panorama.md)**
 
+## 研究机会
+
+基于全面调研识别出的 6 个研究空白，按可行性和影响力排序：
+
+1. **少步模型缓存失效 + 协同设计** — 4 步蒸馏模型中缓存方法是否仍有效？cache-aware distillation
+2. **DuCa "随机 ≈ 重要性" 理论推广** — 随机选择在扩散模型中普遍近似最优？信息论解释
+3. **长视频专项加速** — 场景感知缓存，帧间冗余利用，30s+ 视频验证
+4. **自适应组合框架** — 根据 prompt/硬件/质量要求自动选择最优加速配置
+5. **统一 benchmark** — 跨 6 个方向的公平对比评测框架
+6. **消费级 GPU 优化** — RTX 4090/5090 专项优化，一键部署工具
+
+> 详细分析、实验方案设计见 [docs/07-research-opportunities.md](docs/07-research-opportunities.md)
+
 ## 框架对比
 
 - [FastGen vs FastVideo 对比分析](docs/fastgen-vs-fastvideo.md) — 工程落地选 FastVideo，蒸馏研究选 FastGen，极致性能两者组合

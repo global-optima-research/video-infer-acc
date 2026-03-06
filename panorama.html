@@ -1,0 +1,1912 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频模型推理加速 // 技术全景图</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0a0e17;
+  --bg-card: #0d1220;
+  --bg-card-hover: #111827;
+  --border: #1a2744;
+  --border-glow: #00e5ff22;
+  --cyan: #00e5ff;
+  --cyan-dim: #00e5ff88;
+  --green: #39ff14;
+  --green-dim: #39ff1466;
+  --purple: #bf5af2;
+  --purple-dim: #bf5af266;
+  --amber: #ffab00;
+  --amber-dim: #ffab0066;
+  --red: #ff3b5c;
+  --text: #c8d6e5;
+  --text-dim: #5a6e87;
+  --text-bright: #e8f0fe;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  --sans: 'Noto Sans SC', -apple-system, sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* ── Grid Background ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 60px 60px;
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, #00e5ff08 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Scanline overlay ── */
+.scanlines {
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    #00000009 2px,
+    #00000009 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Navigation ── */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: #0a0e17ee;
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+}
+
+nav .nav-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 48px;
+  overflow-x: auto;
+}
+
+nav .nav-logo {
+  font-weight: 700;
+  color: var(--cyan);
+  white-space: nowrap;
+  font-size: 13px;
+  padding-right: 2rem;
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+nav a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 11px;
+  padding: 0 1rem;
+  white-space: nowrap;
+  transition: color 0.2s;
+  letter-spacing: 0.03em;
+}
+
+nav a:hover, nav a.active { color: var(--cyan); }
+
+/* ── Main Layout ── */
+main {
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 68px 2rem 4rem;
+}
+
+/* ── Section Headers ── */
+.section-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--cyan);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.section-tag::before {
+  content: '//';
+  opacity: 0.5;
+}
+
+.section-title {
+  font-family: var(--sans);
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--text-bright);
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.section-desc {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-bottom: 2rem;
+  max-width: 700px;
+}
+
+section {
+  margin-bottom: 5rem;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+section.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Hero ── */
+.hero {
+  text-align: center;
+  padding: 4rem 0 3rem;
+  position: relative;
+}
+
+.hero-badge {
+  display: inline-block;
+  border: 1px solid var(--border);
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 11px;
+  color: var(--cyan-dim);
+  margin-bottom: 1.5rem;
+  letter-spacing: 0.1em;
+}
+
+.hero h1 {
+  font-family: var(--sans);
+  font-size: clamp(32px, 5vw, 56px);
+  font-weight: 900;
+  color: var(--text-bright);
+  line-height: 1.15;
+  margin-bottom: 1rem;
+  letter-spacing: -0.03em;
+}
+
+.hero h1 .accent { color: var(--cyan); }
+
+.hero-sub {
+  font-size: 15px;
+  color: var(--text-dim);
+  max-width: 600px;
+  margin: 0 auto 2rem;
+  line-height: 1.8;
+  font-family: var(--sans);
+}
+
+.hero-stats {
+  display: flex;
+  justify-content: center;
+  gap: 3rem;
+  flex-wrap: wrap;
+}
+
+.hero-stat {
+  text-align: center;
+}
+
+.hero-stat .val {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--green);
+  display: block;
+  line-height: 1;
+}
+
+.hero-stat .label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  letter-spacing: 0.05em;
+}
+
+/* ── Pipeline ── */
+.pipeline-wrap {
+  overflow-x: auto;
+  padding: 1rem 0;
+}
+
+.pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-width: 900px;
+}
+
+.pipeline-stage {
+  flex: 1;
+  position: relative;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.pipeline-stage:first-child { border-radius: 8px 0 0 8px; }
+.pipeline-stage:last-child { border-radius: 0 8px 8px 0; }
+.pipeline-stage:not(:last-child) { border-right: none; }
+
+.pipeline-stage:hover {
+  border-color: var(--cyan-dim);
+  background: var(--bg-card-hover);
+}
+
+.pipeline-stage.hot {
+  border-color: var(--red);
+  background: #ff3b5c08;
+}
+
+.pipeline-stage.hot .stage-pct { color: var(--red); }
+
+.stage-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+
+.stage-name {
+  font-family: var(--sans);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 4px;
+}
+
+.stage-pct {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--cyan);
+  margin-bottom: 12px;
+}
+
+.stage-techs {
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.stage-techs li {
+  padding: 3px 0;
+  border-top: 1px solid #ffffff06;
+}
+
+.stage-techs li::before {
+  content: '>';
+  color: var(--green-dim);
+  margin-right: 6px;
+}
+
+.pipeline-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 20px;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+/* ── Stacking ── */
+.stack-container {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 2rem;
+  align-items: start;
+}
+
+.stack-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stack-layer {
+  display: grid;
+  grid-template-columns: 180px 1fr 80px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  transition: all 0.3s;
+  cursor: default;
+}
+
+.stack-layer:hover {
+  border-color: var(--cyan-dim);
+  transform: translateX(4px);
+}
+
+.stack-layer-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+  font-family: var(--sans);
+}
+
+.stack-bar-wrap {
+  height: 6px;
+  background: #ffffff08;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.stack-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 1s ease;
+  width: 0;
+}
+
+.stack-layer-val {
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.stack-result {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+}
+
+.stack-result .multiply-icon {
+  font-size: 24px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.stack-result .combined-val {
+  font-size: 48px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--cyan), var(--green));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.stack-result .combined-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  margin-bottom: 1.5rem;
+}
+
+.stack-result .real-world {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.stack-result .real-world span {
+  color: var(--amber);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+/* ── Taxonomy ── */
+.taxonomy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.tax-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  transition: all 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.tax-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.tax-card:nth-child(1)::before { background: var(--cyan); }
+.tax-card:nth-child(2)::before { background: var(--green); }
+.tax-card:nth-child(3)::before { background: var(--purple); }
+.tax-card:nth-child(4)::before { background: var(--amber); }
+.tax-card:nth-child(5)::before { background: var(--red); }
+.tax-card:nth-child(6)::before { background: #64748b; }
+
+.tax-card:hover {
+  border-color: var(--cyan-dim);
+  transform: translateY(-2px);
+}
+
+.tax-num {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.3;
+  margin-bottom: 2px;
+}
+
+.tax-title {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 2px;
+}
+
+.tax-range {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.tax-card:nth-child(1) .tax-range { color: var(--cyan); }
+.tax-card:nth-child(2) .tax-range { color: var(--green); }
+.tax-card:nth-child(3) .tax-range { color: var(--purple); }
+.tax-card:nth-child(4) .tax-range { color: var(--amber); }
+.tax-card:nth-child(5) .tax-range { color: var(--red); }
+.tax-card:nth-child(6) .tax-range { color: #94a3b8; }
+
+.tax-methods {
+  list-style: none;
+  font-size: 12px;
+}
+
+.tax-methods li {
+  padding: 5px 0;
+  border-top: 1px solid #ffffff06;
+  color: var(--text-dim);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.tax-methods li .name {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tax-methods li .star {
+  color: var(--amber);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.tax-methods li .desc {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* ── Scenario Cards ── */
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.scenario-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: all 0.3s;
+  position: relative;
+}
+
+.scenario-card:hover {
+  border-color: var(--cyan-dim);
+  transform: translateY(-3px);
+}
+
+.scenario-header {
+  margin-bottom: 1rem;
+}
+
+.scenario-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.scenario-name {
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 4px;
+}
+
+.scenario-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.scenario-meta .m-val {
+  font-weight: 700;
+}
+
+.scenario-card:nth-child(1) .m-val { color: var(--green); }
+.scenario-card:nth-child(2) .m-val { color: var(--cyan); }
+.scenario-card:nth-child(3) .m-val { color: var(--purple); }
+.scenario-card:nth-child(4) .m-val { color: var(--amber); }
+
+.scenario-stack {
+  list-style: none;
+  font-size: 12px;
+}
+
+.scenario-stack li {
+  padding: 4px 0;
+  color: var(--text-dim);
+}
+
+.scenario-stack li::before {
+  content: '+';
+  color: var(--green-dim);
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+.scenario-result {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.scenario-result .r-val {
+  font-size: 20px;
+  font-weight: 800;
+  display: block;
+  margin-top: 2px;
+}
+
+.scenario-card:nth-child(1) .r-val { color: var(--green); }
+.scenario-card:nth-child(2) .r-val { color: var(--cyan); }
+.scenario-card:nth-child(3) .r-val { color: var(--purple); }
+.scenario-card:nth-child(4) .r-val { color: var(--amber); }
+
+/* ── Scatter Plot ── */
+.scatter-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.scatter-chart {
+  position: relative;
+  width: 100%;
+  height: 420px;
+}
+
+.scatter-y-axis {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 40px;
+  width: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-right: 8px;
+}
+
+.scatter-y-axis span {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.scatter-x-axis {
+  position: absolute;
+  left: 60px;
+  right: 0;
+  bottom: 0;
+  height: 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-top: 8px;
+}
+
+.scatter-x-axis span {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: center;
+  flex: 1;
+}
+
+.scatter-area {
+  position: absolute;
+  left: 60px;
+  top: 0;
+  right: 0;
+  bottom: 40px;
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.scatter-grid-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed #ffffff08;
+}
+
+.scatter-grid-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed #ffffff08;
+}
+
+.scatter-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: all 0.3s;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.scatter-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.scatter-dot:hover {
+  transform: translate(-50%, -50%) scale(1.5);
+}
+
+.scatter-dot:hover::after { opacity: 0.5; }
+
+.scatter-label {
+  position: absolute;
+  font-size: 10px;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, 0);
+  z-index: 3;
+}
+
+.scatter-zone {
+  position: absolute;
+  border: 1px dashed;
+  border-radius: 8px;
+  opacity: 0.12;
+  z-index: 1;
+}
+
+/* ── Timeline ── */
+.timeline-wrap {
+  position: relative;
+  padding: 1rem 0;
+  overflow-x: auto;
+}
+
+.timeline {
+  position: relative;
+  min-width: 1200px;
+  height: 320px;
+  padding-top: 20px;
+}
+
+.timeline-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 160px;
+  height: 2px;
+  background: var(--border);
+}
+
+.timeline-line::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -4px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid var(--border);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+
+.tl-item {
+  position: absolute;
+  top: 160px;
+  transform: translateX(-50%);
+}
+
+.tl-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--cyan);
+  border-radius: 50%;
+  margin: -3px auto 0;
+  position: relative;
+  z-index: 2;
+}
+
+.tl-dot.major {
+  width: 12px;
+  height: 12px;
+  margin: -5px auto 0;
+  box-shadow: 0 0 12px var(--cyan-dim);
+}
+
+.tl-dot.current {
+  background: var(--green);
+  box-shadow: 0 0 16px var(--green-dim);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 8px var(--green-dim); }
+  50% { box-shadow: 0 0 20px var(--green); }
+}
+
+.tl-content-up {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tl-content-down {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tl-date {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.tl-text {
+  font-size: 11px;
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+.tl-text.highlight { color: var(--cyan); font-weight: 600; }
+
+
+/* ── Footer ── */
+footer {
+  text-align: center;
+  padding: 2rem;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  margin-top: 4rem;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Architecture Diagram ── */
+.arch-wrap {
+  overflow-x: auto;
+  padding: 1rem 0;
+}
+
+.arch-diagram {
+  min-width: 1000px;
+  position: relative;
+}
+
+/* The outer frame */
+.arch-frame {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  background: linear-gradient(180deg, #0d122008, #0d1220);
+  position: relative;
+}
+
+.arch-frame-label {
+  position: absolute;
+  top: -10px;
+  left: 24px;
+  background: var(--bg);
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--cyan);
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+
+/* Pipeline row */
+.arch-pipeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin-bottom: 1.5rem;
+  position: relative;
+}
+
+.arch-node {
+  text-align: center;
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  position: relative;
+  min-width: 130px;
+  transition: border-color 0.3s;
+}
+
+.arch-node:hover { border-color: var(--cyan-dim); }
+
+.arch-node.bottleneck {
+  border-color: var(--red);
+  background: #ff3b5c06;
+  min-width: 380px;
+  padding: 10px 24px;
+}
+
+.arch-node-name {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.arch-node-pct {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.arch-node.bottleneck .arch-node-pct {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.arch-arrow {
+  color: var(--text-dim);
+  font-size: 16px;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+
+/* Acceleration layers — stacked vertically below the bottleneck */
+.arch-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+/* Connector from pipeline to layers */
+.arch-connector {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.arch-connector-line {
+  width: 2px;
+  height: 28px;
+  background: linear-gradient(180deg, var(--red), var(--cyan-dim));
+  position: relative;
+}
+
+.arch-connector-line::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-left: 2px solid var(--cyan-dim);
+  border-bottom: 2px solid var(--cyan-dim);
+  transform: rotate(-45deg);
+}
+
+.arch-connector-label {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  letter-spacing: 0.08em;
+}
+
+/* Each acceleration layer row */
+.arch-layer {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  overflow: hidden;
+  transition: all 0.3s;
+}
+
+.arch-layer:hover {
+  border-color: var(--cyan-dim);
+  transform: translateX(3px);
+}
+
+.arch-layer-header {
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-right: 1px solid var(--border);
+  position: relative;
+}
+
+.arch-layer-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+
+.arch-layer:nth-child(1) .arch-layer-header::before { background: var(--cyan); }
+.arch-layer:nth-child(2) .arch-layer-header::before { background: var(--green); }
+.arch-layer:nth-child(3) .arch-layer-header::before { background: var(--purple); }
+.arch-layer:nth-child(4) .arch-layer-header::before { background: var(--amber); }
+.arch-layer:nth-child(5) .arch-layer-header::before { background: var(--red); }
+
+.arch-layer-name {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-bright);
+  line-height: 1.3;
+}
+
+.arch-layer-range {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.arch-layer:nth-child(1) .arch-layer-range { color: var(--cyan); }
+.arch-layer:nth-child(2) .arch-layer-range { color: var(--green); }
+.arch-layer:nth-child(3) .arch-layer-range { color: var(--purple); }
+.arch-layer:nth-child(4) .arch-layer-range { color: var(--amber); }
+.arch-layer:nth-child(5) .arch-layer-range { color: var(--red); }
+
+.arch-layer-methods {
+  padding: 6px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.arch-method {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid #ffffff0a;
+  background: #ffffff06;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.arch-method:hover {
+  border-color: var(--cyan-dim);
+  color: var(--text);
+}
+
+.arch-method.recommended {
+  border-color: var(--amber-dim);
+  color: var(--amber);
+}
+
+.arch-method .m-arrow {
+  font-size: 9px;
+  opacity: 0.4;
+  margin: 0 2px;
+}
+
+/* System layer (spans full width) */
+.arch-system {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.arch-sys-cell {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 8px 14px;
+  text-align: center;
+  transition: border-color 0.3s;
+}
+
+.arch-sys-cell:hover { border-color: var(--cyan-dim); }
+
+.arch-sys-name {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.arch-sys-detail {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* Hardware foundation bar */
+.arch-hardware {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.arch-hw-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.arch-hw-items {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.arch-hw-item {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.arch-hw-item span { color: var(--text); font-weight: 500; }
+
+/* Orthogonal badge */
+.arch-ortho-badge {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%) rotate(90deg);
+  font-size: 10px;
+  color: var(--cyan-dim);
+  letter-spacing: 0.15em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1100px) {
+  .taxonomy-grid { grid-template-columns: repeat(2, 1fr); }
+  .scenario-grid { grid-template-columns: repeat(2, 1fr); }
+  .stack-container { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  main { padding: 60px 1rem 2rem; }
+  .taxonomy-grid { grid-template-columns: 1fr; }
+  .scenario-grid { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 28px; }
+  .hero-stats { gap: 1.5rem; }
+  nav .nav-inner { gap: 0; }
+}
+</style>
+</head>
+<body>
+
+<div class="scanlines"></div>
+
+<nav>
+  <div class="nav-inner">
+    <span class="nav-logo">&gt;_ VIDEO_ACCEL</span>
+    <a href="#pipeline">推理流程</a>
+    <a href="#architecture">全栈架构</a>
+    <a href="#stacking">正交叠加</a>
+    <a href="#taxonomy">方法图谱</a>
+    <a href="#scenarios">场景选型</a>
+    <a href="#scatter">成熟度矩阵</a>
+    <a href="#timeline">时间线</a>
+  </div>
+</nav>
+
+<main>
+
+<!-- ══ HERO ══ -->
+<section class="hero visible" id="top">
+  <div class="hero-badge">RESEARCH REPORT // 2026.03.06</div>
+  <h1>视频模型推理加速<br><span class="accent">技术全景图</span></h1>
+  <p class="hero-sub">
+    覆盖 6 大加速方向、30+ 核心方法、5 个主流框架的系统性调研。<br>
+    从 Progressive Distillation 到 TurboDiffusion 的完整技术演进。
+  </p>
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <span class="val">6</span>
+      <span class="label">加速方向</span>
+    </div>
+    <div class="hero-stat">
+      <span class="val">30+</span>
+      <span class="label">核心方法</span>
+    </div>
+    <div class="hero-stat">
+      <span class="val">200x</span>
+      <span class="label">最大加速比</span>
+    </div>
+    <div class="hero-stat">
+      <span class="val">108x</span>
+      <span class="label">理论叠加</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══ PIPELINE ══ -->
+<section id="pipeline">
+  <div class="section-tag">SECTION 01</div>
+  <div class="section-title">推理流程与加速热点</div>
+  <div class="section-desc">视频扩散模型推理中，~90% 的耗时集中在 Denoiser (DiT)，是加速优化的核心战场。</div>
+
+  <div class="pipeline-wrap">
+    <div class="pipeline">
+      <div class="pipeline-stage">
+        <div class="stage-label">INPUT</div>
+        <div class="stage-name">Prompt</div>
+        <div class="stage-pct">&mdash;</div>
+        <ul class="stage-techs">
+          <li>文本描述输入</li>
+          <li>图像条件 (I2V)</li>
+        </ul>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-stage">
+        <div class="stage-label">STAGE 01</div>
+        <div class="stage-name">Text Encoder</div>
+        <div class="stage-pct">~2%</div>
+        <ul class="stage-techs">
+          <li>T5 / CLIP / Llama</li>
+          <li>可 Offload 到 CPU</li>
+        </ul>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-stage hot">
+        <div class="stage-label">STAGE 02 // BOTTLENECK</div>
+        <div class="stage-name">Denoiser (DiT)</div>
+        <div class="stage-pct">~90%</div>
+        <ul class="stage-techs">
+          <li>步数蒸馏 (12-200x)</li>
+          <li>特征缓存 (2-7x)</li>
+          <li>稀疏注意力 (2-50x)</li>
+          <li>量化 W8A8/FP8 (1.5-5x)</li>
+          <li>torch.compile (1.5-2x)</li>
+          <li>序列并行 (多卡)</li>
+        </ul>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-stage">
+        <div class="stage-label">STAGE 03</div>
+        <div class="stage-name">VAE Decoder</div>
+        <div class="stage-pct">~8%</div>
+        <ul class="stage-techs">
+          <li>轻量 TAE-192 (20x 解码)</li>
+          <li>DLFR-VAE 动态帧率</li>
+          <li>VAE Tiling (显存优化)</li>
+        </ul>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-stage">
+        <div class="stage-label">OUTPUT</div>
+        <div class="stage-name">Video</div>
+        <div class="stage-pct">&mdash;</div>
+        <ul class="stage-techs">
+          <li>480p / 720p / 1080p</li>
+          <li>5-10s 视频输出</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ ARCHITECTURE ══ -->
+<section id="architecture">
+  <div class="section-tag">SECTION 02</div>
+  <div class="section-title">全栈加速架构图</div>
+  <div class="section-desc">完整推理管线与 5 层加速技术的映射关系。各层彼此正交，加速比为乘法关系。</div>
+
+  <div class="arch-wrap">
+    <div class="arch-diagram">
+      <div class="arch-frame">
+        <div class="arch-frame-label">VIDEO DIFFUSION INFERENCE PIPELINE</div>
+
+        <!-- Pipeline Row -->
+        <div class="arch-pipeline">
+          <div class="arch-node">
+            <div class="arch-node-name">Prompt</div>
+            <div class="arch-node-pct">输入</div>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-node">
+            <div class="arch-node-name">Text Encoder</div>
+            <div class="arch-node-pct">~2% 耗时</div>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-node bottleneck">
+            <div class="arch-node-name">Denoiser (DiT) &mdash; 50~100 步去噪</div>
+            <div class="arch-node-pct">~90% 耗时 // BOTTLENECK</div>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-node">
+            <div class="arch-node-name">VAE Decoder</div>
+            <div class="arch-node-pct">~8% 耗时</div>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-node">
+            <div class="arch-node-name">Video</div>
+            <div class="arch-node-pct">输出</div>
+          </div>
+        </div>
+
+        <!-- Connector -->
+        <div class="arch-connector">
+          <div style="position:relative">
+            <div class="arch-connector-line"></div>
+            <div class="arch-connector-label">加速技术栈 &darr;</div>
+          </div>
+        </div>
+
+        <!-- Acceleration Layers -->
+        <div class="arch-layers" style="position:relative">
+          <div class="arch-ortho-badge">ORTHOGONAL &times; MULTIPLICATIVE</div>
+
+          <!-- Layer 1: Step Distillation -->
+          <div class="arch-layer">
+            <div class="arch-layer-header">
+              <div class="arch-layer-name">步数蒸馏</div>
+              <div class="arch-layer-range">12-200x</div>
+            </div>
+            <div class="arch-layer-methods">
+              <span class="arch-method recommended">&#9733; DCM</span>
+              <span class="arch-method">DOLLAR</span>
+              <span class="arch-method">TurboDiffusion</span>
+              <span class="arch-method">Self-Forcing</span>
+              <span class="arch-method">rCM</span>
+              <span class="arch-method" style="color:var(--text-dim);opacity:0.5">50步 <span class="m-arrow">&rarr;</span> 4步</span>
+            </div>
+          </div>
+
+          <!-- Layer 2: Sparse Attention -->
+          <div class="arch-layer">
+            <div class="arch-layer-header">
+              <div class="arch-layer-name">稀疏注意力</div>
+              <div class="arch-layer-range">2-50x</div>
+            </div>
+            <div class="arch-layer-methods">
+              <span class="arch-method recommended">&#9733; STA</span>
+              <span class="arch-method">VSA + DMD2</span>
+              <span class="arch-method">SLA</span>
+              <span class="arch-method">DyDiT</span>
+              <span class="arch-method" style="color:var(--text-dim);opacity:0.5">15% token <span class="m-arrow">&rarr;</span> 70% attn</span>
+            </div>
+          </div>
+
+          <!-- Layer 3: Feature Caching -->
+          <div class="arch-layer">
+            <div class="arch-layer-header">
+              <div class="arch-layer-name">特征缓存</div>
+              <div class="arch-layer-range">2-7x</div>
+            </div>
+            <div class="arch-layer-methods">
+              <span class="arch-method recommended">&#9733; TeaCache</span>
+              <span class="arch-method">AdaCache</span>
+              <span class="arch-method">DuCa</span>
+              <span class="arch-method">MixCache</span>
+              <span class="arch-method">EOC</span>
+              <span class="arch-method" style="color:var(--text-dim);opacity:0.5">跳过冗余步骤</span>
+            </div>
+          </div>
+
+          <!-- Layer 4: Quantization -->
+          <div class="arch-layer">
+            <div class="arch-layer-header">
+              <div class="arch-layer-name">量化</div>
+              <div class="arch-layer-range">1.5-5x</div>
+            </div>
+            <div class="arch-layer-methods">
+              <span class="arch-method recommended">&#9733; FP8 PTQ</span>
+              <span class="arch-method recommended">&#9733; SageAttn2++</span>
+              <span class="arch-method">ViDiT-Q</span>
+              <span class="arch-method">DVD-Quant</span>
+              <span class="arch-method">NVFP4</span>
+              <span class="arch-method" style="color:var(--text-dim);opacity:0.5">FP16 <span class="m-arrow">&rarr;</span> INT4/FP8</span>
+            </div>
+          </div>
+
+          <!-- Layer 5: System Optimization -->
+          <div class="arch-layer">
+            <div class="arch-layer-header">
+              <div class="arch-layer-name">系统优化</div>
+              <div class="arch-layer-range">1.5-2.65x</div>
+            </div>
+            <div class="arch-layer-methods">
+              <span class="arch-method recommended">&#9733; torch.compile</span>
+              <span class="arch-method">USP 序列并行</span>
+              <span class="arch-method">Offloading</span>
+              <span class="arch-method">StreamDiffV2</span>
+              <span class="arch-method" style="color:var(--text-dim);opacity:0.5">kernel 融合 + 多卡</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- System infra row -->
+        <div class="arch-system">
+          <div class="arch-sys-cell">
+            <div class="arch-sys-name">SGLang Diffusion</div>
+            <div class="arch-sys-detail">生产级推理服务</div>
+          </div>
+          <div class="arch-sys-cell">
+            <div class="arch-sys-name">FastVideo</div>
+            <div class="arch-sys-detail">端到端加速框架</div>
+          </div>
+          <div class="arch-sys-cell">
+            <div class="arch-sys-name">FastGen</div>
+            <div class="arch-sys-detail">蒸馏方法统一工具</div>
+          </div>
+        </div>
+
+        <!-- Hardware layer -->
+        <div class="arch-hardware">
+          <div class="arch-hw-label">HARDWARE</div>
+          <div class="arch-hw-items">
+            <div class="arch-hw-item"><span>H100/B200</span> 数据中心</div>
+            <div class="arch-hw-item"><span>RTX 4090/5090</span> 消费级</div>
+            <div class="arch-hw-item"><span>MI300X</span> AMD</div>
+            <div class="arch-hw-item"><span>FlightVGM</span> FPGA</div>
+            <div class="arch-hw-item"><span>Apple M5</span> 边缘</div>
+          </div>
+        </div>
+
+      </div><!-- arch-frame -->
+    </div>
+  </div>
+</section>
+
+<!-- ══ STACKING ══ -->
+<section id="stacking">
+  <div class="section-tag">SECTION 03</div>
+  <div class="section-title">正交叠加：乘法加速</div>
+  <div class="section-desc">6 个加速方向彼此正交，可同时应用。加速比为乘法而非加法关系。</div>
+
+  <div class="stack-container">
+    <div class="stack-layers">
+      <div class="stack-layer" data-color="var(--cyan)" data-width="95">
+        <div class="stack-layer-name">步数蒸馏</div>
+        <div class="stack-bar-wrap"><div class="stack-bar" style="background:var(--cyan)"></div></div>
+        <div class="stack-layer-val" style="color:var(--cyan)">12-200x</div>
+      </div>
+      <div class="stack-layer" data-color="var(--green)" data-width="45">
+        <div class="stack-layer-name">稀疏注意力</div>
+        <div class="stack-bar-wrap"><div class="stack-bar" style="background:var(--green)"></div></div>
+        <div class="stack-layer-val" style="color:var(--green)">2-50x</div>
+      </div>
+      <div class="stack-layer" data-color="var(--purple)" data-width="30">
+        <div class="stack-layer-name">特征缓存</div>
+        <div class="stack-bar-wrap"><div class="stack-bar" style="background:var(--purple)"></div></div>
+        <div class="stack-layer-val" style="color:var(--purple)">2-7x</div>
+      </div>
+      <div class="stack-layer" data-color="var(--amber)" data-width="25">
+        <div class="stack-layer-name">量化</div>
+        <div class="stack-bar-wrap"><div class="stack-bar" style="background:var(--amber)"></div></div>
+        <div class="stack-layer-val" style="color:var(--amber)">1.5-5x</div>
+      </div>
+      <div class="stack-layer" data-color="var(--red)" data-width="18">
+        <div class="stack-layer-name">系统优化</div>
+        <div class="stack-bar-wrap"><div class="stack-bar" style="background:var(--red)"></div></div>
+        <div class="stack-layer-val" style="color:var(--red)">1.5-2.65x</div>
+      </div>
+      <div class="stack-layer" data-color="#64748b" data-width="8">
+        <div class="stack-layer-name">解码加速</div>
+        <div class="stack-bar-wrap"><div class="stack-bar" style="background:#64748b"></div></div>
+        <div class="stack-layer-val" style="color:#94a3b8">1.1-1.2x</div>
+      </div>
+    </div>
+
+    <div class="stack-result">
+      <div class="multiply-icon">12 &times; 2 &times; 2 &times; 1.5 &times; 1.5 &times; 1.1</div>
+      <div class="combined-val">~108x</div>
+      <div class="combined-label">THEORETICAL COMBINED</div>
+      <div class="real-world">
+        实测参考<br>
+        <span>50-200x</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ TAXONOMY ══ -->
+<section id="taxonomy">
+  <div class="section-tag">SECTION 04</div>
+  <div class="section-title">方法图谱</div>
+  <div class="section-desc">6 大加速方向，30+ 核心方法。★ 标注各方向推荐首选。</div>
+
+  <div class="taxonomy-grid">
+    <!-- Card 1 -->
+    <div class="tax-card">
+      <div class="tax-num">01</div>
+      <div class="tax-title">步数蒸馏</div>
+      <div class="tax-range">12-200x</div>
+      <ul class="tax-methods">
+        <li><span class="star">&#9733;</span> <span class="name">DCM</span> <span class="desc">ICCV'25 双专家, 2000轮</span></li>
+        <li><span class="name">DOLLAR</span> <span class="desc">ICCV'25 VSD+CD+LRM, 4步超teacher</span></li>
+        <li><span class="name">TurboDiffusion</span> <span class="desc">rCM+SLA+W8A8, 100-200x</span></li>
+        <li><span class="name">Self-Forcing</span> <span class="desc">17 FPS 实时流式</span></li>
+        <li><span class="name">FastGen</span> <span class="desc">NVIDIA, 8+ 蒸馏方法统一</span></li>
+      </ul>
+    </div>
+    <!-- Card 2 -->
+    <div class="tax-card">
+      <div class="tax-num">02</div>
+      <div class="tax-title">特征缓存</div>
+      <div class="tax-range">2-7x &middot; 零训练</div>
+      <ul class="tax-methods">
+        <li><span class="star">&#9733;</span> <span class="name">TeaCache</span> <span class="desc">CVPR'25 零开销预测, FastVideo标配</span></li>
+        <li><span class="name">AdaCache</span> <span class="desc">ICCV'25 运动感知MoReg, 4.7x</span></li>
+        <li><span class="name">DuCa</span> <span class="desc">随机选择&asymp;重要性, FlashAttn兼容</span></li>
+        <li><span class="name">MixCache</span> <span class="desc">Step/CFG/Block 三粒度自适应</span></li>
+        <li><span class="name">EOC</span> <span class="desc">可叠加到任何缓存方法</span></li>
+      </ul>
+    </div>
+    <!-- Card 3 -->
+    <div class="tax-card">
+      <div class="tax-num">03</div>
+      <div class="tax-title">Token 剪枝与稀疏注意力</div>
+      <div class="tax-range">2-50x</div>
+      <ul class="tax-methods">
+        <li><span class="star">&#9733;</span> <span class="name">STA</span> <span class="desc">Sliding Tile, 10.45x kernel</span></li>
+        <li><span class="name">VSA + DMD2</span> <span class="desc">粗&rarr;细 + 联合蒸馏, 50.9x</span></li>
+        <li><span class="name">SLA</span> <span class="desc">Sparse-Linear, 95% 稀疏度</span></li>
+        <li><span class="name">DyDiT</span> <span class="desc">ICLR'25, 51% FLOPs 减少</span></li>
+      </ul>
+    </div>
+    <!-- Card 4 -->
+    <div class="tax-card">
+      <div class="tax-num">04</div>
+      <div class="tax-title">量化</div>
+      <div class="tax-range">1.5-5x</div>
+      <ul class="tax-methods">
+        <li><span class="star">&#9733;</span> <span class="name">FP8 PTQ</span> <span class="desc">TensorRT 无损, 2.5x</span></li>
+        <li><span class="star">&#9733;</span> <span class="name">SageAttention2++</span> <span class="desc">Q/K INT4, FA2 3.9x</span></li>
+        <li><span class="name">ViDiT-Q</span> <span class="desc">ICLR'25 W8A8 无损</span></li>
+        <li><span class="name">DVD-Quant</span> <span class="desc">W4A8 免数据</span></li>
+        <li><span class="name">NVFP4</span> <span class="desc">Blackwell E2M1, 3.5x 内存压缩</span></li>
+      </ul>
+    </div>
+    <!-- Card 5 -->
+    <div class="tax-card">
+      <div class="tax-num">05</div>
+      <div class="tax-title">解码与流水线</div>
+      <div class="tax-range">1.5-2.65x</div>
+      <ul class="tax-methods">
+        <li><span class="star">&#9733;</span> <span class="name">torch.compile</span> <span class="desc">区域编译, 1.5-2x</span></li>
+        <li><span class="name">USP 序列并行</span> <span class="desc">8&times;H100 2.65x</span></li>
+        <li><span class="name">Group Offloading</span> <span class="desc">13.6GB 跑 720p</span></li>
+        <li><span class="name">StreamDiffV2</span> <span class="desc">14B 4&times;H100 58 FPS</span></li>
+      </ul>
+    </div>
+    <!-- Card 6 -->
+    <div class="tax-card">
+      <div class="tax-num">06</div>
+      <div class="tax-title">硬件与部署</div>
+      <div class="tax-range">基础设施</div>
+      <ul class="tax-methods">
+        <li><span class="star">&#9733;</span> <span class="name">RTX 4090</span> <span class="desc">性价比最优 $0.005/视频</span></li>
+        <li><span class="name">H100 / B200</span> <span class="desc">数据中心主力</span></li>
+        <li><span class="name">SGLang Diffusion</span> <span class="desc">生产级推理服务</span></li>
+        <li><span class="name">FlightVGM</span> <span class="desc">FPGA, 能效 4.49x</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ══ SCENARIOS ══ -->
+<section id="scenarios">
+  <div class="section-tag">SECTION 05</div>
+  <div class="section-title">场景选型</div>
+  <div class="section-desc">四种典型场景的推荐技术栈与预期效果。</div>
+
+  <div class="scenario-grid">
+    <div class="scenario-card">
+      <div class="scenario-header">
+        <div class="scenario-icon">&gt;_</div>
+        <div class="scenario-name">快速见效</div>
+        <div class="scenario-meta">
+          <span><span class="m-val">1 天</span> 集成</span>
+          <span><span class="m-val">$0</span> 成本</span>
+        </div>
+      </div>
+      <ul class="scenario-stack">
+        <li>TeaCache</li>
+        <li>SageAttention</li>
+        <li>torch.compile</li>
+      </ul>
+      <div class="scenario-result">
+        预期加速
+        <span class="r-val">~5x</span>
+      </div>
+    </div>
+
+    <div class="scenario-card">
+      <div class="scenario-header">
+        <div class="scenario-icon">&#9881;</div>
+        <div class="scenario-name">生产部署</div>
+        <div class="scenario-meta">
+          <span><span class="m-val">1 周</span> 集成</span>
+          <span><span class="m-val">~$500</span> 成本</span>
+        </div>
+      </div>
+      <ul class="scenario-stack">
+        <li>DCM 蒸馏 (4步)</li>
+        <li>TeaCache</li>
+        <li>SageAttention</li>
+        <li>FP8 量化</li>
+        <li>SGLang 部署</li>
+      </ul>
+      <div class="scenario-result">
+        预期加速
+        <span class="r-val">~50x</span>
+      </div>
+    </div>
+
+    <div class="scenario-card">
+      <div class="scenario-header">
+        <div class="scenario-icon">&#9889;</div>
+        <div class="scenario-name">极致性能</div>
+        <div class="scenario-meta">
+          <span><span class="m-val">2 周+</span> 集成</span>
+          <span><span class="m-val">~$3000</span> 成本</span>
+        </div>
+      </div>
+      <ul class="scenario-stack">
+        <li>rCM / TurboDiffusion</li>
+        <li>SLA 稀疏注意力</li>
+        <li>W8A8 量化</li>
+        <li>SageAttention</li>
+        <li>序列并行</li>
+      </ul>
+      <div class="scenario-result">
+        预期加速
+        <span class="r-val">~200x</span>
+      </div>
+    </div>
+
+    <div class="scenario-card">
+      <div class="scenario-header">
+        <div class="scenario-icon">&#9654;</div>
+        <div class="scenario-name">实时交互</div>
+        <div class="scenario-meta">
+          <span><span class="m-val">1 周</span> 集成</span>
+          <span><span class="m-val">17 FPS</span></span>
+        </div>
+      </div>
+      <ul class="scenario-stack">
+        <li>Self-Forcing 蒸馏</li>
+        <li>SageAttention</li>
+        <li>FP8 量化</li>
+        <li>KV Cache</li>
+      </ul>
+      <div class="scenario-result">
+        流式生成
+        <span class="r-val">17 FPS</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ SCATTER ══ -->
+<section id="scatter">
+  <div class="section-tag">SECTION 06</div>
+  <div class="section-title">成熟度 &times; 加速比</div>
+  <div class="section-desc">横轴：集成难度。纵轴：加速比 (log)。越靠左上角，投入产出比越高。</div>
+
+  <div class="scatter-wrap">
+    <div class="scatter-chart" id="scatterChart">
+      <!-- Y axis -->
+      <div class="scatter-y-axis">
+        <span>200x</span>
+        <span>100x</span>
+        <span>50x</span>
+        <span>10x</span>
+        <span>5x</span>
+        <span>2x</span>
+        <span>1x</span>
+      </div>
+      <!-- X axis -->
+      <div class="scatter-x-axis">
+        <span>即插即用</span>
+        <span>轻量配置</span>
+        <span>需要微调</span>
+        <span>需要蒸馏</span>
+        <span>联合训练</span>
+      </div>
+      <!-- Plot area -->
+      <div class="scatter-area" id="scatterArea">
+        <!-- Grid lines rendered by JS -->
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ TIMELINE ══ -->
+<section id="timeline">
+  <div class="section-tag">SECTION 07</div>
+  <div class="section-title">技术演进时间线</div>
+  <div class="section-desc">从 2022 年 Progressive Distillation 到 2026 年 TurboDiffusion 200x 加速。</div>
+
+  <div class="timeline-wrap">
+    <div class="timeline" id="timelineContainer">
+      <div class="timeline-line"></div>
+    </div>
+  </div>
+</section>
+
+
+</main>
+
+<footer>
+  <span style="color:var(--cyan)">&gt;_</span> VIDEO_INFERENCE_ACCELERATION // 技术全景图 // global-optima-research // 2026.03
+</footer>
+
+<script>
+// ── Intersection Observer for reveal ──
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('section').forEach(s => observer.observe(s));
+
+// ── Nav active state ──
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('nav a');
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(s => {
+    if (window.scrollY >= s.offsetTop - 100) current = s.id;
+  });
+  navLinks.forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+});
+
+// ── Animate stack bars ──
+const stackObs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      const w = e.target.dataset.width;
+      e.target.querySelector('.stack-bar').style.width = w + '%';
+    }
+  });
+}, { threshold: 0.3 });
+document.querySelectorAll('.stack-layer').forEach(l => stackObs.observe(l));
+
+// ── Scatter Plot ──
+(function() {
+  const area = document.getElementById('scatterArea');
+  if (!area) return;
+  const W = area.offsetWidth || 900;
+  const H = area.offsetHeight || 360;
+
+  // Grid
+  for (let i = 1; i < 7; i++) {
+    const h = document.createElement('div');
+    h.className = 'scatter-grid-h';
+    h.style.top = (i / 7 * 100) + '%';
+    area.appendChild(h);
+  }
+  for (let i = 1; i < 5; i++) {
+    const v = document.createElement('div');
+    v.className = 'scatter-grid-v';
+    v.style.left = (i / 5 * 100) + '%';
+    area.appendChild(v);
+  }
+
+  // data: [name, xCategory(0-4), speedup, color]
+  const data = [
+    ['torch.compile', 0, 1.5, '#64748b'],
+    ['MixCache', 0, 1.97, '#bf5af2'],
+    ['SageAttention', 0, 3.9, '#ffab00'],
+    ['AdaCache', 0, 4.7, '#39ff14'],
+    ['TeaCache', 0, 6.83, '#39ff14'],
+    ['FP8 PTQ', 1, 2.5, '#ffab00'],
+    ['STA', 1, 10.45, '#bf5af2'],
+    ['DCM+TeaCache', 3, 54, '#00e5ff'],
+    ['Self-Forcing', 3, 150, '#00e5ff'],
+    ['FastVideo Sparse', 4, 50.9, '#39ff14'],
+    ['TurboDiffusion', 4, 200, '#ff3b5c'],
+  ];
+
+  const logScale = (v) => {
+    const minLog = Math.log10(1);
+    const maxLog = Math.log10(250);
+    return 1 - (Math.log10(v) - minLog) / (maxLog - minLog);
+  };
+
+  data.forEach(([name, xCat, speedup, color]) => {
+    const xPct = (xCat + 0.5) / 5 * 100;
+    const yPct = logScale(speedup) * 100;
+
+    const dot = document.createElement('div');
+    dot.className = 'scatter-dot';
+    dot.style.left = xPct + '%';
+    dot.style.top = yPct + '%';
+    dot.style.background = color;
+    dot.style.color = color;
+    dot.title = name + ' (' + speedup + 'x)';
+    area.appendChild(dot);
+
+    const label = document.createElement('div');
+    label.className = 'scatter-label';
+    label.style.left = xPct + '%';
+    label.style.top = (yPct - 5) + '%';
+    label.textContent = name;
+    label.style.transform = 'translate(-50%, -100%)';
+    label.style.color = color;
+    area.appendChild(label);
+  });
+
+  // Zone labels
+  const zones = [
+    { x: '10%', y: '75%', w: '15%', h: '20%', color: 'var(--green)', label: '即插即用区' },
+    { x: '70%', y: '5%', w: '25%', h: '35%', color: 'var(--red)', label: '极致性能区' },
+  ];
+  zones.forEach(z => {
+    const el = document.createElement('div');
+    el.className = 'scatter-zone';
+    el.style.left = z.x;
+    el.style.top = z.y;
+    el.style.width = z.w;
+    el.style.height = z.h;
+    el.style.borderColor = z.color;
+    el.style.background = z.color;
+    area.appendChild(el);
+  });
+})();
+
+// ── Timeline ──
+(function() {
+  const container = document.getElementById('timelineContainer');
+  if (!container) return;
+
+  const events = [
+    { date: '2022', text: 'Progressive Distillation', pct: 2, major: true, up: true },
+    { date: '2023.03', text: 'Consistency Models', pct: 10, up: false },
+    { date: '2023.10', text: 'LCM / SDXL-Turbo', pct: 17, up: true },
+    { date: '2023.12', text: 'VideoLCM', pct: 21, up: false },
+    { date: '2024.08', text: 'PAB', pct: 32, up: true },
+    { date: '2024.10', text: 'FastVideo V0', pct: 36, up: false },
+    { date: '2024.11', text: 'AdaCache / TeaCache', pct: 40, major: true, up: true },
+    { date: '2024.12', text: 'DuCa / DOLLAR', pct: 44, up: false },
+    { date: '2025.01', text: 'ViDiT-Q', pct: 48, up: true },
+    { date: '2025.02', text: 'STA', pct: 52, up: false },
+    { date: '2025.05', text: 'SageAttention2', pct: 58, up: true },
+    { date: '2025.06', text: 'DCM / FastGen / Self-Forcing', pct: 63, major: true, up: false },
+    { date: '2025.08', text: 'MixCache / BLADE / FastWan', pct: 69, up: true },
+    { date: '2025.10', text: 'rCM (ICLR\'26)', pct: 75, up: false },
+    { date: '2025.12', text: 'TurboDiffusion 200x', pct: 82, major: true, up: true, highlight: true },
+    { date: '2026.01', text: 'FastGen 开源 / NVFP4', pct: 88, up: false },
+    { date: '2026.03', text: 'We are here', pct: 95, current: true, up: true, highlight: true },
+  ];
+
+  events.forEach(ev => {
+    const item = document.createElement('div');
+    item.className = 'tl-item';
+    item.style.left = ev.pct + '%';
+
+    const dot = document.createElement('div');
+    dot.className = 'tl-dot' + (ev.major ? ' major' : '') + (ev.current ? ' current' : '');
+    item.appendChild(dot);
+
+    const content = document.createElement('div');
+    content.className = ev.up ? 'tl-content-up' : 'tl-content-down';
+
+    const dateEl = document.createElement('div');
+    dateEl.className = 'tl-date';
+    dateEl.textContent = ev.date;
+    content.appendChild(dateEl);
+
+    const textEl = document.createElement('div');
+    textEl.className = 'tl-text' + (ev.highlight ? ' highlight' : '');
+    textEl.textContent = ev.text;
+    content.appendChild(textEl);
+
+    item.appendChild(content);
+    container.appendChild(item);
+  });
+})();
+</script>
+
+</body>
+</html>

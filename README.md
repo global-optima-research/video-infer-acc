@@ -128,6 +128,10 @@
 
 > 完整分析、实验方案、50+ 新发现论文见 [docs/07-research-opportunities.md](docs/07-research-opportunities.md)
 
+## 架构趋势
+
+- [AR 会是视频生成的未来吗？](docs/08-ar-vs-dit-future.md) — 不会完全替代 DiT，混合架构（A2D/Diffusion-Forcing）更可能成为主流
+
 ## 框架对比
 
 - [FastGen vs FastVideo 对比分析](docs/fastgen-vs-fastvideo.md) — 工程落地选 FastVideo，蒸馏研究选 FastGen，极致性能两者组合

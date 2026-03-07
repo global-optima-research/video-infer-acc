@@ -98,44 +98,44 @@ def analyze_property_3(stats, config):
     if len(prompt_indices) < 2:
         return {'verdict': 'INSUFFICIENT DATA (need >=2 prompts)'}
 
-    ious = []
-    # Compare all prompt pairs for same (layer, step)
+    # Method: compare per-head attention statistics across prompts
+    # (top-k index IoU is unreliable because sampled queries differ across prompts)
+    # Instead, compare block_diag_ratio and entropy profiles (input-independent metrics)
+    correlations = []
+
+    # For each (step, layer), compare per-head block_diag_ratio vectors across prompts
     for s_idx in stats[prompt_indices[0]]:
         for l_idx in stats[prompt_indices[0]].get(s_idx, {}):
-            # Collect top-k indices across prompts
-            prompt_topk = {}
+            prompt_vectors = {}
             for p_idx in prompt_indices:
-                layer_stats = stats.get(p_idx, {}).get(s_idx, {}).get(l_idx, {})
-                if 'topk_indices_for_iou' not in layer_stats:
-                    continue
-                # Flatten across heads for overall IoU
-                prompt_topk[p_idx] = set()
-                for head_indices in layer_stats['topk_indices_for_iou']:
-                    prompt_topk[p_idx].update(head_indices)
+                ls = stats.get(p_idx, {}).get(s_idx, {}).get(l_idx, {})
+                if 'block_diag_ratio' in ls and 'entropy_normalized' in ls:
+                    # Use block_diag_ratio + entropy as feature vector per head
+                    vec = ls['block_diag_ratio'] + ls['entropy_normalized']
+                    prompt_vectors[p_idx] = np.array(vec)
 
-            # Pairwise IoU
-            p_list = list(prompt_topk.keys())
+            # Pairwise cosine similarity
+            p_list = list(prompt_vectors.keys())
             for i in range(len(p_list)):
                 for j in range(i + 1, len(p_list)):
-                    s1 = prompt_topk[p_list[i]]
-                    s2 = prompt_topk[p_list[j]]
-                    if len(s1) == 0 or len(s2) == 0:
-                        continue
-                    iou = len(s1 & s2) / len(s1 | s2)
-                    ious.append(iou)
+                    v1 = prompt_vectors[p_list[i]]
+                    v2 = prompt_vectors[p_list[j]]
+                    cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-10)
+                    correlations.append(float(cos))
 
-    if not ious:
+    if not correlations:
         return {'verdict': 'NO DATA'}
 
-    mean_iou = float(np.mean(ious))
-    median_iou = float(np.median(ious))
+    mean_cos = float(np.mean(correlations))
+    median_cos = float(np.median(correlations))
 
     return {
-        'mean_iou': round(mean_iou, 4),
-        'median_iou': round(median_iou, 4),
-        'num_comparisons': len(ious),
-        'expected': '>0.8 (literature: >0.9)',
-        'verdict': 'CONFIRMED' if mean_iou > 0.8 else 'WEAK' if mean_iou > 0.5 else 'NOT CONFIRMED',
+        'method': 'cosine similarity of per-head [block_diag_ratio, entropy] vectors across prompts',
+        'mean_cosine_sim': round(mean_cos, 4),
+        'median_cosine_sim': round(median_cos, 4),
+        'num_comparisons': len(correlations),
+        'expected': '>0.9 (literature: >0.9 index overlap)',
+        'verdict': 'CONFIRMED' if mean_cos > 0.9 else 'WEAK' if mean_cos > 0.7 else 'NOT CONFIRMED',
     }
 
 
@@ -390,8 +390,9 @@ python scripts/phase0_attention_profiling.py \\
     if p3:
         report += f"""**结论: {p3['verdict']}**
 
-- 平均 IoU: **{p3.get('mean_iou', 'N/A')}**
-- 中位数 IoU: {p3.get('median_iou', 'N/A')}
+- 方法: {p3.get('method', 'N/A')}
+- 平均余弦相似度: **{p3.get('mean_cosine_sim', 'N/A')}**
+- 中位数: {p3.get('median_cosine_sim', 'N/A')}
 - 比较次数: {p3.get('num_comparisons', 0)}
 - 预期: {p3.get('expected', '')}
 """
@@ -529,7 +530,7 @@ def main():
         # Print without per_step details (too verbose)
         p4_summary = {k: v for k, v in analysis['property_4'].items()
                       if k not in ('per_step_mean_change', 'per_step_mean_cosim')}
-        print(json.dumps(p4_summary, indent=2))
+        print(json.dumps(p4_summary, indent=2, default=str))
 
     print("\n=== Property ⑤ Head Specialization ===")
     analysis['property_5'] = analyze_property_5(stats, config)

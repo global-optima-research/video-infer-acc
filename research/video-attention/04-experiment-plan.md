@@ -168,60 +168,91 @@ GPU: RTX 5090, 耗时 87 分钟
 | 1b SSIM > 0.95 但 1d 掩码不稳定 | **CONDITIONAL GO** → 只做步级跳过，放弃掩码复用 |
 | 1b SSIM < 0.90 | **NO GO** → 步级跳过收益不够，重新评估方向 |
 
+### Phase 1 实际结果
+
+> 实验报告: [experiments/phase1_step_skip_validation_20260307_2100.md](../../experiments/phase1_step_skip_validation_20260307_2100.md)
+
+| 实验 | 结果 | 判定 |
+|------|------|------|
+| 1a 复用容忍度 | 仅 12.7% 的 (step,layer) 对变化 < 5%，后期步+首尾层最稳定 | 参考数据 |
+| 1b 跳步质量 | **所有 6 策略 SSIM < 0.55**，全层跳步不可行 | ❌ NO GO |
+| 1c 层敏感度 | **0/30 安全层**，所有层 SSIM < 0.75 | ❌ NO GO |
+| 1d 稀疏 Mask | top-1% IoU=0.82, top-5% IoU=0.86, top-10% IoU=0.88 | ✅ GO |
+
+**核心发现**：
+1. 步间注意力输出复用方案彻底失败 — 即使 1 步陈旧缓存，误差也会指数级放大
+2. 层位置比变化量更重要 — Pearson r(change, SSIM) = +0.77，首尾层变化小但跳过最致命
+3. 稀疏 Mask 跨步高度稳定 — IoU > 0.8，可用于指导稀疏注意力计算
+
+**Go/No-Go 判定：CONDITIONAL GO**
+- ❌ 步间输出复用路线放弃
+- ✅ 稀疏 Mask 复用路线继续 → Phase 2 调整为稀疏注意力验证
+
 ---
 
-## Phase 2: 头异构调度 PyTorch 原型（3-5 天，单卡）
+## Phase 2: 稀疏注意力 + Mask 复用验证（3-5 天，单卡）
+
+> **基于 Phase 1 调整**：放弃步间输出复用，聚焦稀疏注意力方向。
+> Phase 1d 验证了稀疏 mask 跨步 IoU > 0.8，现在验证实际稀疏注意力的质量和加速效果。
 
 ### 核心假设
-> 对不同类型的头使用不同计算策略，比统一策略有显著加速。
+> top-k% 稀疏注意力保持视频质量（SSIM > 0.95），且 mask 可跨步复用减少计算量。
 
-### 前置调整（基于 Phase 0）
+### 实验 2a：稀疏注意力质量验证
 
-Phase 0 发现 75.6% 的头被分类为 "mixed"，说明原始的四分类（spatial/temporal/global/sink）阈值太严格。Phase 2 需要：
-1. **细化分类**：用连续特征（block_diag_ratio, temporal_specificity, entropy）做聚类，而非硬阈值
-2. **梯度式策略**：不是 4 种离散策略，而是根据连续特征选择窗口大小和精度
+**目标**：用 top-k% mask 做稀疏 attention，验证视频质量。
 
-### 实验
+```
+做法：
+  每步每层：计算全注意力矩阵 → 提取 top-k% 位置 → 只在这些位置做 softmax
+  即：稀疏 mask 来自当前步（最佳情况），验证稀疏本身是否可行
 
-**2a. 头分类器（改进版）**
-```python
-# 基于 Phase 0 采集的数据
-# 用 KMeans 或 GMM 对 (block_diag_ratio, temporal_specificity, entropy) 聚类
-# 确定最优类数 K (预期 4-6 类)
-# 为每类分配计算策略
+保留比例: 1%, 5%, 10%, 20%, 50%
+指标: SSIM, PSNR vs 全注意力基准
+
+成功标准: top-10% 稀疏 SSIM > 0.95
 ```
 
-**2b. PyTorch 级别异构注意力**
-```python
-def heterogeneous_attention(Q, K, V, head_configs):
-    outputs = []
-    for h, config in enumerate(head_configs):
-        if config.type == 'spatial':
-            out = window_attention(Q[h], K[h], V[h], window=config.window_size)
-        elif config.type == 'temporal':
-            out = strided_attention(Q[h], K[h], V[h], stride=H*W)
-        elif config.type == 'global':
-            out = linear_attention(Q[h], K[h], V[h])
-        elif config.type == 'sink':
-            out = V[h].mean(dim=0).expand_as(Q[h])
-    return stack(outputs)
+### 实验 2b：Mask 跨步复用 + 稀疏计算
+
+**目标**：用 step s-1 的 top-k% mask 指导 step s 的稀疏 attention。
+
+```
+做法：
+  步 0:   全注意力 → 提取 mask M_0
+  步 1:   用 M_0 做稀疏 attention → 提取 M_1 (from 稀疏结果)
+  步 2:   用 M_1 做稀疏 attention → ...
+
+  或交替：
+  步 0: 全注意力 → M_0
+  步 1: 用 M_0 稀疏
+  步 2: 全注意力 → M_2
+  步 3: 用 M_2 稀疏
+  ...
+
+测试：连续复用 1/2/3 步后的质量衰减
+成功标准: 隔步复用 SSIM > 0.95
 ```
 
-**2c. 质量测试**
+### 实验 2c：与 STA 对比
+
+**目标**：比较数据驱动的 top-k mask vs 固定 tile 模式 (STA)。
+
 ```
 对比:
   - 基准: 全注意力 (FlashAttention)
-  - 方案A: 统一窗口 (STA 式)
-  - 方案B: 异构调度 (本方法)
-  - 方案C: 异构 + Phase 1 的步级跳过
+  - 方案A: STA (Sliding Tile, 固定模式)
+  - 方案B: top-k% 稀疏 (数据驱动)
+  - 方案C: top-k% + mask 复用
+  - 方案D: Phase 0 的头异构调度
 
-指标: SSIM, LPIPS, 肉眼对比
-模型: Wan 2.1-1.3B, 10-50 个 prompt
+指标: 同等稀疏度下的 SSIM/PSNR
 ```
 
 ### 成功标准
-- 方案 B 在相同稀疏度下质量 > 方案 A → 异构有价值
-- 方案 C 叠加后质量仍可接受 → 维度间可组合
+- 2a: top-10% 稀疏 SSIM > 0.95 → 稀疏本身可行
+- 2b: mask 复用 1-2 步 SSIM > 0.95 → 复用可行
+- 2c: 方案 B/C 质量 ≥ 方案 A → 数据驱动有价值（否则直接用 STA）
 
 ---
 
@@ -282,7 +313,7 @@ dispatcher:
 | Phase | 时间 | GPU | 产出 | 状态 |
 |-------|------|-----|------|------|
 | 0: 数据采集 | 1.5h | 1× 5090 | 结构性质验证 | ✅ 完成 |
-| 1: 跳过/复用可行性 | 3 天 | 1× 5090 | go/no-go 决策 | ⬜ 下一步 |
+| 1: 跳过/复用可行性 | 0.5 天 | 4× 5090 并行 | go/no-go 决策 | ✅ 完成 |
 | 2: PyTorch 原型 | 3-5 天 | 1× 5090 | 质量验证 | ⬜ |
 | 3: Triton kernel | 1-2 周 | 1× 5090/H100 | 速度验证 | ⬜ |
 | 4: 预编译 | 1 周 | 1× 5090/H100 | 完整系统 | ⬜ |

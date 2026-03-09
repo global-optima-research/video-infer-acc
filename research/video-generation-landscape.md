@@ -11,8 +11,8 @@
 极热 🔴🔴🔴  推理加速 | 核心模型训练(大厂) | 注意力优化
 很热 🔴🔴    可控生成(motion/camera) | 身份保持 | 3D/4D生成 | 统一理解+生成
 热   🔴      视频编辑 | 世界模型/物理 | 步数蒸馏
-温热 🟡      音视频联合生成 | 交互式视频/游戏引擎
-偏冷 🟢      视频RLHF/对齐 | 视频数据工程 | 视频生成评估方法
+温热 🟡      音视频联合生成 | 交互式视频/游戏引擎 | 视频RLHF/对齐
+偏冷 🟢      视频数据工程 | 视频生成评估方法
 ```
 
 ## 各方向详细状态
@@ -31,38 +31,51 @@
 | 步数蒸馏 | rCM (ICLR'26), CausVid (CVPR'25), DCM | 热 | ✅ | 无 |
 | 音视频联合 | MOVA, LTX-2, Seedance 2.0 | 温热 | ✅ | 无 |
 | 交互式视频 | Yan, GameGen-X | 温热 | ⚠️ | 无 |
-| **视频 RLHF/对齐** | **VideoReward (仅 1 篇系统性工作)** | **偏冷** | **✅** | **有** |
+| **视频 RLHF/对齐** | **VideoDPO (CVPR'25), VideoReward 等 5-6 篇** | **温热** | **✅** | **有** |
 | 视频数据工程 | — | 偏冷 | ✅ | 无 |
 | 视频生成评估 | VBench-2.0, Video-Bench | 偏冷 | ✅ | 有 |
 
 ## 推荐方向排序
 
-### ★★★ 视频生成对齐（Video Generation Alignment）— 最推荐
+### ★★★ 视频生成对齐（Video Generation Alignment）
 
-**现状**：
-- 图像 RLHF 已成熟（ImageReward, HPS, DPOK），视频 RLHF 才刚起步
-- 目前仅 1 篇系统性工作 VideoReward (2025.01)，其自述 "RLHF for video generation has been less explored"
-- VideoReward 标注 182k 样本，覆盖 Visual Quality / Motion Quality / Text Alignment
-- 提出 Flow-DPO 和 Flow-RWR 两种对齐算法
+> **热度修正**：初始评估为"偏冷"，经二次验证修正为"温热"。
+> 闭源大厂（HunyuanVideo 1.5, Kling）已在做，学术界有 5-6 篇。但相比图像对齐（几十篇），仍属早期。
 
-**明确的未解决问题**：
-1. 视频特有维度的 reward 建模（时间一致性、物理合理性、运动自然度）
-2. 长视频的 reward（当前只针对短片段）
-3. Reward hacking 在视频中的表现和缓解
-4. Flow-DPO / Flow-RWR 的训练稳定性
-5. 视频 reward 与推理时搜索的结合（Video-T1 用的 verifier 很简单）
+**已有工作（比初始评估更多）**：
 
-**我们的优势**：
-- Phase 0/1 的注意力分析可启发 attention-based reward signals — 我们知道什么注意力模式对应高质量视频
-- 8×H800 足够训练 reward model + RL fine-tuning（Wan 1.3B）
-- 不需要和大厂竞争模型能力，而是改善已有模型的对齐
+闭源模型：
+| 模型 | 对齐情况 |
+|------|---------|
+| HunyuanVideo 1.5 | ✅ CT → SFT → DPO + RLHF（MixGRPO），4 维 VLM reward model |
+| Kling 2.6/3.0 | ✅ RLHF，多 reward model |
+| Sora 2 | ✅ 大概率做了（未公开细节） |
+| Seedance 2.0 | ✅ feedback-driven learning |
+| **Wan 2.1** | **❓ 未公开做过对齐** |
+| CogVideoX | ❌ 基础模型没有 |
 
-**可能的贡献**：
-1. 更好的 video reward model（增加物理/运动维度，或用注意力特征做 reward signal）
-2. 更稳定的视频 RLHF 训练算法
-3. 基于 reward 的推理时搜索（比 Video-T1 更好的 verifier）
+学术工作：
+| 工作 | 发表 | 内容 |
+|------|------|------|
+| VideoDPO | CVPR 2025 | OmniScore 偏好对齐，3 个开源模型验证 |
+| VideoReward | 2025.01 | 182k 偏好数据 + Flow-DPO/Flow-RWR |
+| OnlineVPO | 2024.12 | 在线视频偏好优化 |
+| Dual-IPO | 2025.02 | 双迭代偏好优化 |
+| VPO | ICCV 2025 | 通过 prompt 优化做对齐（不改模型） |
+| Discriminator-Free DPO | 2025.04 | 无判别器的视频 DPO |
 
-**风险**：方向正在升温，需要快速行动。需要学习 RLHF/DPO 技术栈。
+**仍然存在的未解决问题**：
+1. Reward model 质量不够 — 现有 reward 大多基于图像指标拼凑，没有真正理解视频时间维度
+2. 物理合理性 — 没有好的自动评估方法
+3. 长视频对齐 — 现有工作都是短片段
+4. Wan 2.1（最流行开源模型）没有公开做过对齐
+
+**如果做，差异化切入点**：
+1. 更好的 video reward model — 利用注意力分析数据设计新评估维度
+2. 物理感知的 reward — 目前没人做好
+3. 在 Wan 2.1 上做对齐 — 最流行的开源模型但没有公开对齐过
+
+**风险**：方向正在快速升温，需要快速行动。需要学习 RLHF/DPO 技术栈。
 
 ### ★★ 推理加速半占领方向（详见 direction-analysis.md）
 
@@ -97,7 +110,7 @@
 
 | 方向 | 新颖性 | 资源匹配 | 我们的优势 | 出成果速度 | 综合 |
 |------|--------|---------|-----------|-----------|------|
-| **视频 RLHF/对齐** | **高** | **✅** | **中** | **中** | **★★★** |
+| **视频 RLHF/对齐** | **中高** | **✅** | **中** | **中** | **★★★** |
 | 推理加速(半占领) | 中 | ✅ | 高 | 快 | ★★ |
 | 生成质量诊断 | 中高 | ✅ | 高 | 中 | ★★ |
 | 交互式视频 | 高 | ⚠️ | 低 | 慢 | ★★ |
@@ -114,9 +127,14 @@
 ## 参考文献
 
 ### 视频 RLHF/对齐
-- [VideoReward: Improving Video Generation with Human Feedback](https://arxiv.org/abs/2501.13918) — 首个系统性工作 (2025.01)
-- [Aligning Anime Video Generation with Human Feedback](https://arxiv.org/abs/2504.10044) — 领域特化
-- [Unified Reward Model for Multimodal Understanding and Generation](https://arxiv.org/abs/2503.05236) — 统一 reward
+- [VideoDPO](https://arxiv.org/abs/2412.14167) — OmniScore 偏好对齐, CVPR 2025
+- [VideoReward](https://arxiv.org/abs/2501.13918) — 182k 偏好数据 + Flow-DPO/Flow-RWR (2025.01)
+- [OnlineVPO](https://arxiv.org/abs/2412.15159) — 在线视频偏好优化 (2024.12)
+- [Dual-IPO](https://arxiv.org/abs/2502.02088) — 双迭代偏好优化 (2025.02)
+- [VPO](https://arxiv.org/html/2503.20491v1) — Prompt 优化对齐, ICCV 2025
+- [Discriminator-Free DPO for Video](https://arxiv.org/abs/2504.08542) — 无判别器 (2025.04)
+- [HunyuanVideo 1.5 Technical Report](https://arxiv.org/html/2511.18870v2) — 完整 DPO+RLHF pipeline
+- [Unified Reward Model](https://arxiv.org/abs/2503.05236) — 统一 reward
 
 ### 可控生成
 - [MotionAgent](https://arxiv.org/abs/2502.03207) — ICCV 2025

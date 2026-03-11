@@ -127,8 +127,15 @@ class SparseWanAttnProcessor:
             hidden_states_img = hidden_states_img.type_as(query)
 
         # ── Attention (full or sparse) ──
-        if (self.attn_type == 'self' and self.window is not None
-                and query.shape[1] == self.num_frames_latent * self.spatial_tokens):
+        expected_tokens = self.num_frames_latent * self.spatial_tokens
+        use_sparse = (self.attn_type == 'self' and self.window is not None
+                      and query.shape[1] == expected_tokens)
+        if not hasattr(self, '_debug_logged'):
+            self._debug_logged = True
+            print(f"  [DEBUG] layer={self.layer_idx} attn_type={self.attn_type} "
+                  f"window={self.window} q.shape={tuple(query.shape)} "
+                  f"expected_N={expected_tokens} use_sparse={use_sparse}")
+        if use_sparse:
             hidden_states = self._frame_local_attention(query, key, value)
         else:
             # Full attention (cross-attention or baseline)

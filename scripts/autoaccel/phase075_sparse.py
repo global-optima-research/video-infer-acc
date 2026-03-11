@@ -127,15 +127,8 @@ class SparseWanAttnProcessor:
             hidden_states_img = hidden_states_img.type_as(query)
 
         # ── Attention (full or sparse) ──
-        expected_tokens = self.num_frames_latent * self.spatial_tokens
-        use_sparse = (self.attn_type == 'self' and self.window is not None
-                      and query.shape[1] == expected_tokens)
-        if not hasattr(self, '_debug_logged'):
-            self._debug_logged = True
-            print(f"  [DEBUG] layer={self.layer_idx} attn_type={self.attn_type} "
-                  f"window={self.window} q.shape={tuple(query.shape)} "
-                  f"expected_N={expected_tokens} use_sparse={use_sparse}")
-        if use_sparse:
+        if (self.attn_type == 'self' and self.window is not None
+                and query.shape[1] == self.num_frames_latent * self.spatial_tokens):
             hidden_states = self._frame_local_attention(query, key, value)
         else:
             # Full attention (cross-attention or baseline)
@@ -225,7 +218,8 @@ def load_wan_pipeline(model_name, device):
 def install_sparse_processors(transformer, window=None, num_frames_latent=5,
                               height=480, width=832):
     """Replace self-attention processors with sparse versions."""
-    spatial_tokens = (height // 8) * (width // 8)  # 60 * 104 = 6240
+    # Wan VAE downsamples spatially by 16x (not 8x)
+    spatial_tokens = (height // 16) * (width // 16)  # 30 * 52 = 1560
     processors = {}
 
     for name, module in transformer.named_modules():
@@ -352,7 +346,7 @@ def run_experiment(args):
 
     # Compute latent dimensions
     num_frames_latent = (args.num_frames - 1) // 4 + 1  # 17 -> 5
-    spatial_tokens = (args.height // 8) * (args.width // 8)  # 6240
+    spatial_tokens = (args.height // 16) * (args.width // 16)  # 30*52=1560
     total_tokens = num_frames_latent * spatial_tokens
 
     print(f"\nLatent: {num_frames_latent} frames × {spatial_tokens} spatial = {total_tokens} tokens")

@@ -216,8 +216,14 @@ def load_wan_pipeline(model_name, device):
 
 
 def install_sparse_processors(transformer, window=None, num_frames_latent=5,
-                              height=480, width=832):
-    """Replace self-attention processors with sparse versions."""
+                              height=480, width=832, sparse_layers=None):
+    """Replace self-attention processors with sparse versions.
+
+    Args:
+        sparse_layers: If None, apply to all layers. If a set/list of ints,
+                       only apply sparse attention to those layer indices.
+                       Other layers get full attention (window=None).
+    """
     # Wan VAE downsamples spatially by 16x (not 8x)
     spatial_tokens = (height // 16) * (width // 16)  # 30 * 52 = 1560
     processors = {}
@@ -237,8 +243,11 @@ def install_sparse_processors(transformer, window=None, num_frames_latent=5,
                     attn_type = 'cross'
 
             if layer_idx is not None:
-                # Only apply sparse to self-attention
-                w = window if attn_type == 'self' else None
+                # Determine window for this layer
+                if attn_type == 'self' and (sparse_layers is None or layer_idx in sparse_layers):
+                    w = window
+                else:
+                    w = None
                 proc = SparseWanAttnProcessor(
                     layer_idx, attn_type, window=w,
                     num_frames_latent=num_frames_latent,
@@ -248,10 +257,12 @@ def install_sparse_processors(transformer, window=None, num_frames_latent=5,
                 key = f"{attn_type}_{layer_idx}"
                 processors[key] = proc
 
-    self_count = sum(1 for k in processors if k.startswith('self'))
+    sparse_count = sum(1 for k, p in processors.items()
+                       if k.startswith('self') and p.window is not None)
+    total_self = sum(1 for k in processors if k.startswith('self'))
     cross_count = sum(1 for k in processors if k.startswith('cross'))
-    print(f"Installed {self_count} sparse self-attn + {cross_count} cross-attn processors "
-          f"(window={window})")
+    print(f"Installed {sparse_count}/{total_self} sparse self-attn + {cross_count} cross-attn "
+          f"processors (window={window}, sparse_layers={sparse_layers})")
     return processors
 
 
@@ -304,13 +315,22 @@ def generate_video(pipe, prompt, height=480, width=832,
 # ─── Experiment Runner ───────────────────────────────────────────────────────
 
 CONFIG_SPECS = {
-    'C0': {'window': None, 'fbc': None,  'desc': 'Baseline (full 3D attention)'},
-    'C1': {'window': 0,    'fbc': None,  'desc': 'Window=0 (same-frame only)'},
-    'C2': {'window': 1,    'fbc': None,  'desc': 'Window=1 (±1 frame)'},
-    'C3': {'window': 0,    'fbc': 0.03,  'desc': 'Window=0 + FBC t=0.03'},
-    'C4': {'window': 1,    'fbc': 0.03,  'desc': 'Window=1 + FBC t=0.03'},
-    'C5': {'window': 0,    'fbc': 0.05,  'desc': 'Window=0 + FBC t=0.05'},
-    'C6': {'window': 1,    'fbc': 0.05,  'desc': 'Window=1 + FBC t=0.05'},
+    'C0': {'window': None, 'fbc': None,  'layers': None,  'desc': 'Baseline (full 3D attention)'},
+    'C1': {'window': 0,    'fbc': None,  'layers': None,  'desc': 'Window=0 ALL layers'},
+    'C2': {'window': 1,    'fbc': None,  'layers': None,  'desc': 'Window=1 ALL layers'},
+    'C3': {'window': 0,    'fbc': 0.03,  'layers': None,  'desc': 'Window=0 ALL + FBC 0.03'},
+    'C4': {'window': 1,    'fbc': 0.03,  'layers': None,  'desc': 'Window=1 ALL + FBC 0.03'},
+    'C5': {'window': 0,    'fbc': 0.05,  'layers': None,  'desc': 'Window=0 ALL + FBC 0.05'},
+    'C6': {'window': 1,    'fbc': 0.05,  'layers': None,  'desc': 'Window=1 ALL + FBC 0.05'},
+    # Selective sparse: only apply to last N layers (30 total)
+    'S1': {'window': 0,    'fbc': None,  'layers': set(range(15, 30)),  'desc': 'Window=0 last-15 layers'},
+    'S2': {'window': 0,    'fbc': None,  'layers': set(range(20, 30)),  'desc': 'Window=0 last-10 layers'},
+    'S3': {'window': 0,    'fbc': None,  'layers': set(range(25, 30)),  'desc': 'Window=0 last-5 layers'},
+    'S4': {'window': 1,    'fbc': None,  'layers': set(range(15, 30)),  'desc': 'Window=1 last-15 layers'},
+    'S5': {'window': 1,    'fbc': None,  'layers': set(range(20, 30)),  'desc': 'Window=1 last-10 layers'},
+    # Selective sparse + FBC combos
+    'S6': {'window': 0,    'fbc': 0.03,  'layers': set(range(15, 30)),  'desc': 'W0 last-15 + FBC 0.03'},
+    'S7': {'window': 0,    'fbc': 0.03,  'layers': set(range(20, 30)),  'desc': 'W0 last-10 + FBC 0.03'},
 }
 
 
@@ -376,6 +396,7 @@ def run_experiment(args):
                 pipe.transformer, window=spec['window'],
                 num_frames_latent=num_frames_latent,
                 height=args.height, width=args.width,
+                sparse_layers=spec.get('layers'),
             )
 
         # Setup FBC
@@ -421,6 +442,8 @@ def run_experiment(args):
         results['description'] = spec['desc']
         results['window'] = spec['window']
         results['fbc_threshold'] = spec['fbc']
+        results['sparse_layers'] = sorted(spec.get('layers')) if spec.get('layers') else None
+        results['num_sparse_layers'] = len(spec['layers']) if spec.get('layers') else (30 if spec['window'] is not None else 0)
         results['sparsity'] = compute_sparsity(spec['window'], num_frames_latent)
         all_results[cfg_name] = results
 

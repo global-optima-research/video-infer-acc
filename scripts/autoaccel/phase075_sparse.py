@@ -57,12 +57,13 @@ class SparseWanAttnProcessor:
     """
 
     def __init__(self, layer_idx, attn_type='self', window=None,
-                 num_frames_latent=5, spatial_tokens=6240):
+                 num_frames_latent=5, spatial_tokens=6240, step_tracker=None):
         self.layer_idx = layer_idx
         self.attn_type = attn_type
         self.window = window  # None = full attention
         self.num_frames_latent = num_frames_latent
         self.spatial_tokens = spatial_tokens
+        self.step_tracker = step_tracker  # shared dict: {"step": int, "start": int}
 
     def __call__(
         self,
@@ -127,7 +128,11 @@ class SparseWanAttnProcessor:
             hidden_states_img = hidden_states_img.type_as(query)
 
         # ── Attention (full or sparse) ──
-        if (self.attn_type == 'self' and self.window is not None
+        # Step-adaptive: only apply sparse after start step
+        step_ok = True
+        if self.step_tracker is not None:
+            step_ok = self.step_tracker["step"] >= self.step_tracker["start"]
+        if (self.attn_type == 'self' and self.window is not None and step_ok
                 and query.shape[1] == self.num_frames_latent * self.spatial_tokens):
             hidden_states = self._frame_local_attention(query, key, value)
         else:
@@ -216,13 +221,15 @@ def load_wan_pipeline(model_name, device):
 
 
 def install_sparse_processors(transformer, window=None, num_frames_latent=5,
-                              height=480, width=832, sparse_layers=None):
+                              height=480, width=832, sparse_layers=None,
+                              step_tracker=None):
     """Replace self-attention processors with sparse versions.
 
     Args:
         sparse_layers: If None, apply to all layers. If a set/list of ints,
                        only apply sparse attention to those layer indices.
-                       Other layers get full attention (window=None).
+        step_tracker: If provided, a shared dict {"step": int, "start": int}.
+                      Sparse attention only activates when step >= start.
     """
     # Wan VAE downsamples spatially by 16x (not 8x)
     spatial_tokens = (height // 16) * (width // 16)  # 30 * 52 = 1560
@@ -252,6 +259,7 @@ def install_sparse_processors(transformer, window=None, num_frames_latent=5,
                     layer_idx, attn_type, window=w,
                     num_frames_latent=num_frames_latent,
                     spatial_tokens=spatial_tokens,
+                    step_tracker=step_tracker,
                 )
                 module.processor = proc
                 key = f"{attn_type}_{layer_idx}"
@@ -299,13 +307,25 @@ def disable_fbc(pipe):
 # ─── Video Generation ────────────────────────────────────────────────────────
 
 def generate_video(pipe, prompt, height=480, width=832,
-                   num_frames=17, num_steps=50, seed=42, device="cuda:0"):
+                   num_frames=17, num_steps=50, seed=42, device="cuda:0",
+                   step_tracker=None):
     generator = torch.Generator(device=device).manual_seed(seed)
+
+    # Step callback to update tracker
+    callback = None
+    if step_tracker is not None:
+        step_tracker["step"] = 0
+        def _step_cb(pipe_obj, step_idx, timestep, cb_kwargs):
+            step_tracker["step"] = step_idx
+            return cb_kwargs
+        callback = _step_cb
+
     with torch.no_grad():
         output = pipe(
             prompt=prompt, height=height, width=width,
             num_frames=num_frames, num_inference_steps=num_steps,
             generator=generator, output_type="np",
+            callback_on_step_end=callback,
         )
     frames = output.frames[0]
     frames_tensor = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2)
@@ -331,6 +351,18 @@ CONFIG_SPECS = {
     # Selective sparse + FBC combos
     'S6': {'window': 0,    'fbc': 0.03,  'layers': set(range(15, 30)),  'desc': 'W0 last-15 + FBC 0.03'},
     'S7': {'window': 0,    'fbc': 0.03,  'layers': set(range(20, 30)),  'desc': 'W0 last-10 + FBC 0.03'},
+    # Step-adaptive sparse: only apply sparse after step N (out of 50)
+    'T1': {'window': 0,  'fbc': None, 'layers': None, 'step_start': 25, 'desc': 'W=0 ALL, steps 25-49'},
+    'T2': {'window': 0,  'fbc': None, 'layers': None, 'step_start': 30, 'desc': 'W=0 ALL, steps 30-49'},
+    'T3': {'window': 0,  'fbc': None, 'layers': None, 'step_start': 35, 'desc': 'W=0 ALL, steps 35-49'},
+    'T4': {'window': 0,  'fbc': None, 'layers': None, 'step_start': 40, 'desc': 'W=0 ALL, steps 40-49'},
+    'T5': {'window': 0,  'fbc': None, 'layers': None, 'step_start': 45, 'desc': 'W=0 ALL, steps 45-49'},
+    # Step-adaptive + layer-selective combos
+    'T6': {'window': 0,  'fbc': None, 'layers': set(range(10, 30)), 'step_start': 25, 'desc': 'W=0 L10-29, steps 25-49'},
+    'T7': {'window': 0,  'fbc': None, 'layers': set(range(10, 30)), 'step_start': 35, 'desc': 'W=0 L10-29, steps 35-49'},
+    # Best step-adaptive + FBC (will pick based on T1-T5 results)
+    'T8': {'window': 0,  'fbc': 0.03, 'layers': None, 'step_start': 25, 'desc': 'W=0 steps 25-49 + FBC 0.03'},
+    'T9': {'window': 0,  'fbc': 0.03, 'layers': None, 'step_start': 35, 'desc': 'W=0 steps 35-49 + FBC 0.03'},
 }
 
 
@@ -389,6 +421,13 @@ def run_experiment(args):
         print(f"Config: {cfg_name} — {spec['desc']}")
         print(f"{'─' * 50}")
 
+        # Setup step tracker for step-adaptive sparse
+        step_start = spec.get('step_start')
+        step_tracker = None
+        if step_start is not None:
+            step_tracker = {"step": 0, "start": step_start}
+            print(f"  Step-adaptive: sparse only at steps >= {step_start}")
+
         # Setup sparse attention
         reset_processors(pipe.transformer)
         if spec['window'] is not None:
@@ -397,6 +436,7 @@ def run_experiment(args):
                 num_frames_latent=num_frames_latent,
                 height=args.height, width=args.width,
                 sparse_layers=spec.get('layers'),
+                step_tracker=step_tracker,
             )
 
         # Setup FBC
@@ -409,7 +449,8 @@ def run_experiment(args):
             print(f"  Warmup...", end="", flush=True)
             _ = generate_video(pipe, "warmup test", height=args.height,
                              width=args.width, num_frames=args.num_frames,
-                             num_steps=args.num_steps, seed=args.seed, device=device)
+                             num_steps=args.num_steps, seed=args.seed, device=device,
+                             step_tracker=step_tracker)
             torch.cuda.synchronize()
             gc.collect(); torch.cuda.empty_cache()
             print(" done")
@@ -423,7 +464,8 @@ def run_experiment(args):
 
             frames = generate_video(pipe, prompt, height=args.height,
                                   width=args.width, num_frames=args.num_frames,
-                                  num_steps=args.num_steps, seed=args.seed, device=device)
+                                  num_steps=args.num_steps, seed=args.seed, device=device,
+                                  step_tracker=step_tracker)
 
             torch.cuda.synchronize()
             gen_time = time.time() - t0
@@ -444,6 +486,7 @@ def run_experiment(args):
         results['fbc_threshold'] = spec['fbc']
         results['sparse_layers'] = sorted(spec.get('layers')) if spec.get('layers') else None
         results['num_sparse_layers'] = len(spec['layers']) if spec.get('layers') else (30 if spec['window'] is not None else 0)
+        results['step_start'] = spec.get('step_start')
         results['sparsity'] = compute_sparsity(spec['window'], num_frames_latent)
         all_results[cfg_name] = results
 

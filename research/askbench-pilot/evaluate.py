@@ -228,6 +228,10 @@ MODEL_CONFIGS = {
         "backend": "vllm",
         "model_id": "Qwen/Qwen2.5-7B-Instruct",
     },
+    "qwen3.5-9b-local": {
+        "backend": "transformers",
+        "model_id": "Qwen/Qwen3.5-9B-Instruct",
+    },
 }
 
 

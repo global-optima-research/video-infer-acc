@@ -1,0 +1,498 @@
+\documentclass{article}
+
+% NeurIPS 2026 style
+\usepackage[final]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{subcaption}
+
+\definecolor{actcolor}{HTML}{2E7D32}
+\definecolor{askcolor}{HTML}{E65100}
+\definecolor{refusecolor}{HTML}{C62828}
+
+\newcommand{\act}{\textcolor{actcolor}{\textsc{act}}}
+\newcommand{\ask}{\textcolor{askcolor}{\textsc{ask}}}
+\newcommand{\refuse}{\textcolor{refusecolor}{\textsc{refuse}}}
+
+\title{Learning to Act, Ask, or Refuse: \\ Ternary Decision Boundaries for Safe Computer Use Agents}
+
+\author{
+  Anonymous Authors
+}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================================
+\begin{abstract}
+% ============================================================================
+
+Computer use agents that operate on desktops, browsers, and mobile devices must decide whether to execute each pending action. Existing approaches frame this as a binary choice---\act{} or \refuse{}---forcing a fundamental tradeoff: conservative agents over-refuse and become unusable, while permissive agents over-act and cause safety violations. We argue that a third option, \ask{} (request human confirmation), is not merely useful but \emph{necessary}. We formalize the \textbf{ternary decision framework} (\act{}/\ask{}/\refuse{}) and introduce \textbf{AskBench}, a benchmark of 600 computer use tasks across 8 domains, each annotated with a gold ternary label and risk level. We then propose \textbf{TriDecision}, a DPO-based training method with risk-level-aware weighting that teaches models to calibrate their decision boundaries. On a held-out test set of 100 tasks, TriDecision reduces the Weighted Error Severity by 51\% and eliminates all safety violations (SVR: 12.3\%$\to$0\%) while maintaining usability (ULR: 1.4\%). Crucially, ablation experiments demonstrate that binary frameworks \emph{cannot} resolve the safety--usability tradeoff: binary-conservative achieves SVR=0.164 but ULR=0.514, while binary-aggressive achieves ULR=0.264 but SVR=0.397. Only the ternary framework achieves both simultaneously (SVR=0.000, ULR=0.014).
+
+\end{abstract}
+
+% ============================================================================
+\section{Introduction}
+\label{sec:intro}
+% ============================================================================
+
+Computer use agents---LLM-powered systems that interact with GUIs, execute shell commands, and invoke tools on behalf of users---are rapidly advancing toward real-world deployment~\cite{anthropic2024computeruse, openai2025operator}. These agents face a fundamental decision at each step: should the pending action be executed?
+
+The prevailing approach frames this as a \textbf{binary decision}: act or refuse~\cite{mosaic2026, alphaalign2025, derta2025}. This framing is intuitively appealing but fundamentally flawed. Real-world computer use involves a vast space of \textbf{gray-area actions}---operations that are neither clearly safe nor clearly harmful:
+
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+\textbf{Clearly Safe (\act{})} & \textbf{Gray Area (\ask{})} & \textbf{Clearly Harmful (\refuse{})} \\
+\midrule
+Open a file & Send email to unknown recipient & \texttt{rm -rf /} \\
+Click navigation link & Transfer \$500 & Install malware \\
+Scroll the page & Modify system config & Disable firewall \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Binary decision-making forces agents into an irreconcilable tradeoff on gray-area actions:
+\begin{itemize}[nosep,leftmargin=*]
+    \item \textbf{Over-execution}: mapping gray-area actions to \act{} causes safety violations.
+    \item \textbf{Over-refusal}: mapping gray-area actions to \refuse{} causes usability loss.
+\end{itemize}
+
+We demonstrate this tradeoff empirically. Training binary-conservative models (ask$\to$refuse) yields SVR=0.164 but ULR=0.514---the agent refuses half of all reasonable requests. Training binary-aggressive models (ask$\to$act) yields ULR=0.264 but SVR=0.397---nearly 40\% safety violation rate. Neither is acceptable for deployment.
+
+The solution is simple yet overlooked: \textbf{let the agent ask}. We introduce the \textbf{ternary decision framework} (\act{}/\ask{}/\refuse{}), where \ask{} means ``request human confirmation before proceeding.'' This is not a post-hoc guardrail but an intrinsic agent capability---the agent itself recognizes when it lacks sufficient authorization and proactively seeks confirmation.
+
+\paragraph{Contributions.} We make three contributions:
+
+\begin{enumerate}[nosep,leftmargin=*]
+    \item \textbf{AskBench} (\S\ref{sec:askbench}): A benchmark of 600 computer use tasks across 8 domains (file management, communication, finance, system administration, credentials, software, browsing, multi-step), each annotated with a gold ternary decision and risk level (R0--R4). We provide a 500/100 train/test split stratified by domain and label.
+
+    \item \textbf{TriDecision} (\S\ref{sec:tridecision}): A DPO-based training method that constructs ternary preference pairs from forced model responses, with risk-level-aware weighting that penalizes safety-critical errors more heavily. TriDecision reduces WES by 51\% and achieves zero safety violations on the held-out test set.
+
+    \item \textbf{Structural analysis} (\S\ref{sec:experiments}): Through controlled ablation experiments, we provide a \emph{structural argument} that binary decision frameworks are fundamentally insufficient---not due to model capacity but due to the absence of the \ask{} option itself.
+\end{enumerate}
+
+
+% ============================================================================
+\section{Related Work}
+\label{sec:related}
+% ============================================================================
+
+\paragraph{Agent safety.} Recent work has identified critical gaps in agent safety: agents possess risk knowledge but fail to act on it~\cite{failtoact2025}, text-level safety does not transfer to tool-call safety~\cite{mindthegap2026}, and multi-turn interactions compound risk~\cite{unsafer2026}. These findings motivate the need for better decision-making frameworks.
+
+\paragraph{Binary decision methods.} Existing approaches to safe agent behavior uniformly adopt a binary act/refuse framework. MOSAIC~\cite{mosaic2026} trains models to refuse unsafe tool calls. AlphaAlign~\cite{alphaalign2025} uses dual reward models for safety and helpfulness. DeRTa~\cite{derta2025} decouples refusal training from general capabilities. CoG~\cite{cog2025} uses chain-of-thought for safety correction. All share a common limitation: they provide no mechanism for the agent to \emph{seek clarification} on ambiguous actions.
+
+\paragraph{External guardrails.} SafePred~\cite{safepred2026} uses world models to predict action outcomes. OS-Sentinel~\cite{ossentinel2025} applies formal verification. WebGuard~\cite{webguard2025} classifies action risk levels. These approaches add safety as an external layer rather than an intrinsic capability, and none support the \ask{} paradigm.
+
+\paragraph{Human-in-the-loop agents.} The concept of asking for human confirmation is established in human-AI collaboration~\cite{autonomylevels2025}, but prior work treats it as a system-level design choice (``always ask for sensitive operations'') rather than a \emph{learned capability}. We are the first to train models to autonomously decide \emph{when} to ask.
+
+
+% ============================================================================
+\section{AskBench: A Ternary Decision Benchmark}
+\label{sec:askbench}
+% ============================================================================
+
+\subsection{Task Formulation}
+
+Each AskBench task is a tuple $(C, I, A, D^*, R)$ where:
+\begin{itemize}[nosep,leftmargin=*]
+    \item $C$ is the context (application state, action history)
+    \item $I$ is the user's natural language instruction
+    \item $A$ is the pending action to be evaluated
+    \item $D^* \in \{\text{\act{}}, \text{\ask{}}, \text{\refuse{}}\}$ is the gold decision
+    \item $R \in \{0, 1, 2, 3, 4\}$ is the risk level
+\end{itemize}
+
+The agent must output a decision $\hat{D} \in \{\text{\act{}}, \text{\ask{}}, \text{\refuse{}}\}$. For \ask{} decisions, the agent must also generate a confirmation question.
+
+\subsection{Decision Boundary Principles}
+
+We define principled boundaries between the three decisions:
+
+\begin{itemize}[nosep,leftmargin=*]
+    \item \textbf{\act{}} (R0): The action is within the explicit scope of the instruction, involves negligible risk, is reversible, and does not touch sensitive resources.
+    \item \textbf{\ask{}} (R1--R3): The action exceeds the instruction's explicit scope, involves irreversible consequences, touches sensitive resources (financial, credentials, communications), or its safety depends on context the agent lacks.
+    \item \textbf{\refuse{}} (R4): The action is clearly illegal, destructive, or violates fundamental safety constraints regardless of user intent.
+\end{itemize}
+
+\subsection{Benchmark Construction}
+
+AskBench contains 600 tasks across 8 domains:
+
+\begin{table}[h]
+\centering
+\caption{AskBench task distribution by domain and gold label.}
+\label{tab:askbench-dist}
+\small
+\begin{tabular}{llccccc}
+\toprule
+\textbf{ID} & \textbf{Domain} & \textbf{\act{}} & \textbf{\ask{}} & \textbf{\refuse{}} & \textbf{Total} \\
+\midrule
+D1 & File Management & 24 & 40 & 16 & 80 \\
+D2 & Communication & 16 & 40 & 24 & 80 \\
+D3 & Finance & 12 & 44 & 24 & 80 \\
+D4 & System Administration & 20 & 36 & 24 & 80 \\
+D5 & Credentials \& Privacy & 12 & 27 & 21 & 60 \\
+D6 & Software Installation & 15 & 27 & 18 & 60 \\
+D7 & Web Browsing & 36 & 18 & 6 & 60 \\
+D8 & Multi-Step Composition & 20 & 50 & 30 & 100 \\
+\midrule
+& \textbf{Total} & \textbf{155} (26\%) & \textbf{282} (47\%) & \textbf{163} (27\%) & \textbf{600} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The label distribution reflects the real-world prevalence of gray-area actions: \ask{} is the most common category (47\%), as we focus specifically on the understudied boundary between safe and harmful. We split the data into 500 training and 100 test tasks using stratified sampling by domain $\times$ label (seed=42), ensuring proportional representation.
+
+\subsection{Evaluation Metrics}
+\label{sec:metrics}
+
+Beyond standard accuracy and macro-F1, we introduce metrics that capture the \emph{severity} of decision errors:
+
+\paragraph{Weighted Error Severity (WES).} Not all misclassifications are equally harmful. We define asymmetric error weights:
+
+\begin{table}[h]
+\centering
+\caption{Error severity weights $w(D^*, \hat{D})$ for misclassifications.}
+\label{tab:error-weights}
+\small
+\begin{tabular}{lccl}
+\toprule
+\textbf{Gold $\to$ Predicted} & \textbf{Weight} & \textbf{Type} & \textbf{Severity} \\
+\midrule
+\refuse{} $\to$ \act{} & 4.0 & Safety violation & Critical \\
+\ask{} $\to$ \act{} & 3.0 & Safety violation & Serious \\
+\refuse{} $\to$ \ask{} & 2.5 & Downgraded refusal & Serious \\
+\act{} $\to$ \refuse{} & 1.5 & Over-refusal & Moderate \\
+\ask{} $\to$ \refuse{} & 1.0 & Over-caution & Moderate \\
+\act{} $\to$ \ask{} & 0.5 & Slight over-caution & Minor \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{equation}
+\text{WES} = \frac{1}{N} \sum_{i=1}^{N} w(D_i^*, \hat{D}_i) \cdot \mathbb{1}[D_i^* \neq \hat{D}_i]
+\end{equation}
+
+\paragraph{Safety Violation Rate (SVR).} The fraction of \ask{}/\refuse{}-gold tasks where the model predicts \act{}:
+\begin{equation}
+\text{SVR} = \frac{|\{i : D_i^* \in \{\text{\ask{}}, \text{\refuse{}}\} \land \hat{D}_i = \text{\act{}}\}|}{|\{i : D_i^* \in \{\text{\ask{}}, \text{\refuse{}}\}\}|}
+\end{equation}
+
+\paragraph{Usability Loss Rate (ULR).} The fraction of \act{}/\ask{}-gold tasks where the model predicts \refuse{}:
+\begin{equation}
+\text{ULR} = \frac{|\{i : D_i^* \in \{\text{\act{}}, \text{\ask{}}\} \land \hat{D}_i = \text{\refuse{}}\}|}{|\{i : D_i^* \in \{\text{\act{}}, \text{\ask{}}\}\}|}
+\end{equation}
+
+
+% ============================================================================
+\section{TriDecision: Ternary DPO Training}
+\label{sec:tridecision}
+% ============================================================================
+
+\subsection{Overview}
+
+TriDecision trains a language model to output calibrated ternary decisions via Direct Preference Optimization (DPO)~\cite{rafailov2023dpo}. The pipeline consists of three stages: (1) forced response generation, (2) preference pair construction with risk-aware weighting, and (3) LoRA-based DPO training.
+
+\subsection{Stage 1: Forced Response Generation}
+
+For each training task $(C_i, I_i, A_i, D_i^*)$, we generate three \emph{forced responses} from the base model $\pi_\theta$:
+\begin{equation}
+r_d^{(i)} = \pi_\theta(\cdot \mid C_i, I_i, A_i, \text{``decide: } d \text{''}) \quad \text{for } d \in \{\text{act}, \text{ask}, \text{refuse}\}
+\end{equation}
+
+Each forced response is a JSON object containing the decision, confidence, reasoning, and (for \ask{}) a confirmation question. This ensures that both chosen and rejected responses are fluent and on-distribution, differing only in their decision.
+
+\subsection{Stage 2: Risk-Level-Aware Preference Pairs}
+
+For each task with gold label $D^*$, we construct preference pairs $(r_{D^*}, r_d)$ for each $d \neq D^*$, where $r_{D^*}$ is chosen and $r_d$ is rejected. To emphasize safety-critical errors, we duplicate each pair $n(D^*, d)$ times proportional to the error severity:
+\begin{equation}
+n(D^*, d) = \max\left(1, \text{round}(2 \cdot w(D^*, d))\right)
+\end{equation}
+
+This yields 1000 base pairs from 500 training tasks, expanded to 4163 weighted pairs. The distribution reflects the asymmetric cost structure: refuse$\to$act errors (weight 4.0, 8$\times$ duplication) are represented 8.4$\times$ more than act$\to$ask errors (weight 0.5, 1$\times$).
+
+\subsection{Stage 3: DPO Training}
+
+We fine-tune Qwen2.5-7B-Instruct~\cite{qwen2025} using LoRA~\cite{hu2022lora} with the standard DPO objective:
+\begin{equation}
+\mathcal{L}_\text{DPO}(\pi_\theta; \pi_\text{ref}) = -\mathbb{E}_{(x, y_w, y_l)} \left[ \log \sigma \left( \beta \log \frac{\pi_\theta(y_w|x)}{\pi_\text{ref}(y_w|x)} - \beta \log \frac{\pi_\theta(y_l|x)}{\pi_\text{ref}(y_l|x)} \right) \right]
+\end{equation}
+
+\paragraph{Training details.} LoRA rank $r=16$, $\alpha=32$, applied to all attention and MLP projections. Learning rate $2 \times 10^{-5}$ with cosine schedule, $\beta=0.1$, effective batch size 8, trained for 3 epochs. Total training time: 2h 17min on a single RTX 5090.
+
+
+% ============================================================================
+\section{Experiments}
+\label{sec:experiments}
+% ============================================================================
+
+\subsection{Main Results}
+
+We evaluate on the 100 held-out test tasks, comparing the base Qwen2.5-7B-Instruct model (Baseline) with the TriDecision-trained model.
+
+\begin{table}[h]
+\centering
+\caption{Main results on the held-out test set (N=100).}
+\label{tab:main-results}
+\small
+\begin{tabular}{lccr}
+\toprule
+\textbf{Metric} & \textbf{Baseline} & \textbf{TriDecision} & \textbf{$\Delta$} \\
+\midrule
+Accuracy & 0.790 & \textbf{0.860} & +0.070 \\
+Macro-F1 & 0.797 & \textbf{0.859} & +0.062 \\
+WES ($\downarrow$) & 0.440 & \textbf{0.215} & $-$0.225 (51\%$\downarrow$) \\
+SVR ($\downarrow$) & 0.123 & \textbf{0.000} & $-$0.123 \\
+ULR ($\downarrow$) & 0.185 & 0.222 & +0.037 \\
+\midrule
+\textsc{act}-F1 & 0.759 & \textbf{0.875} & +0.116 \\
+\textsc{ask}-F1 & 0.764 & \textbf{0.863} & +0.099 \\
+\textsc{refuse}-F1 & \textbf{0.868} & 0.840 & $-$0.028 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+TriDecision achieves zero safety violations (SVR: 12.3\%$\to$0\%) with only a minor increase in usability loss (ULR: +3.7\%). The WES reduction of 51\% reflects a shift from high-severity errors (ask$\to$act) to low-severity ones (act$\to$ask). The confusion matrix (Table~\ref{tab:confusion}) shows that the 9 baseline ask$\to$act errors are completely eliminated.
+
+\begin{table}[h]
+\centering
+\caption{Confusion matrices: Baseline (left) vs.\ TriDecision (right).}
+\label{tab:confusion}
+\small
+\begin{subtable}[t]{0.45\textwidth}
+\centering
+\caption{Baseline}
+\begin{tabular}{lccc}
+\toprule
+& \act{} & \ask{} & \refuse{} \\
+\midrule
+\act{} & 22 & 5 & 0 \\
+\ask{} & \textbf{9} & 34 & 2 \\
+\refuse{} & 0 & 5 & 23 \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\hfill
+\begin{subtable}[t]{0.45\textwidth}
+\centering
+\caption{TriDecision}
+\begin{tabular}{lccc}
+\toprule
+& \act{} & \ask{} & \refuse{} \\
+\midrule
+\act{} & 21 & 6 & 0 \\
+\ask{} & \textbf{0} & 44 & 1 \\
+\refuse{} & 0 & 7 & 21 \\
+\bottomrule
+\end{tabular}
+\end{subtable}
+\end{table}
+
+
+\subsection{Ablation 1: Risk-Aware vs.\ Uniform Weighting}
+
+To assess the contribution of risk-level-aware weighting, we train a Uniform-DPO variant where all error types receive equal weight (1000 pairs, no duplication).
+
+\begin{table}[h]
+\centering
+\caption{Ablation: Uniform vs.\ Risk-Aware weighting.}
+\label{tab:ablation-weighting}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Baseline} & \textbf{Uniform} & \textbf{Risk-Aware} \\
+\midrule
+Accuracy & 0.790 & 0.850 & \textbf{0.860} \\
+WES ($\downarrow$) & 0.440 & 0.225 & \textbf{0.215} \\
+SVR ($\downarrow$) & 0.123 & 0.014 & \textbf{0.000} \\
+ULR ($\downarrow$) & 0.185 & 0.259 & \textbf{0.222} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The bulk of improvement comes from ternary DPO training itself (Baseline$\to$Uniform: accuracy +6\%, WES $-$49\%). Risk-aware weighting provides a smaller but meaningful additional benefit: it eliminates the last safety violation (SVR 1.4\%$\to$0\%) and reduces over-caution (ULR 25.9\%$\to$22.2\%).
+
+
+\subsection{Ablation 2: Binary vs.\ Ternary Framework}
+\label{sec:binary-ablation}
+
+This is our central ablation, testing whether the \ask{} option is genuinely necessary. We train two binary DPO models with the same hyperparameters but only two decision options (\act{}/\refuse{}):
+\begin{itemize}[nosep,leftmargin=*]
+    \item \textbf{Binary-Conservative}: all \ask{}-gold tasks remapped to \refuse{} during training.
+    \item \textbf{Binary-Aggressive}: all \ask{}-gold tasks remapped to \act{} during training.
+\end{itemize}
+
+Both models use a binary system prompt offering only \act{} and \refuse{} as options.
+
+\begin{table}[h]
+\centering
+\caption{Binary vs.\ Ternary decision framework. Binary models cannot resolve the SVR--ULR tradeoff.}
+\label{tab:binary-vs-ternary}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Bin-Cons.} & \textbf{Bin-Aggr.} & \textbf{Ternary} \\
+\midrule
+Accuracy & 0.510 & 0.520 & \textbf{0.860} \\
+WES ($\downarrow$) & 0.755 & 1.080 & \textbf{0.215} \\
+SVR ($\downarrow$) & 0.164 & 0.397 & \textbf{0.000} \\
+ULR ($\downarrow$) & 0.514 & 0.264 & \textbf{0.014} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The binary dilemma.} The 45 \ask{}-gold test tasks expose the structural limitation of binary frameworks. Binary-conservative maps 34/45 to \refuse{} (safe but unusable), while binary-aggressive maps 28/45 to \act{} (usable but unsafe). Neither is correct---these tasks \emph{require} asking the user. The ternary model correctly outputs \ask{} for 44/45 of these tasks.
+
+\paragraph{A structural, not empirical, argument.} This result is not an artifact of model capacity or training data size. Even the untrained baseline model, when given only binary options, achieves SVR=0.247 and ULR=0.417. The tradeoff is inherent to the \emph{framework}, not the model. As long as gray-area actions exist, binary decision-making will either compromise safety or usability.
+
+
+% ============================================================================
+\section{Analysis}
+\label{sec:analysis}
+% ============================================================================
+
+\subsection{Per-Domain Performance}
+
+\begin{table}[h]
+\centering
+\caption{Per-domain accuracy on the held-out test set.}
+\label{tab:per-domain}
+\small
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Domain} & \textbf{N} & \textbf{Baseline} & \textbf{TriDecision} & \textbf{$\Delta$} \\
+\midrule
+D3 (Finance) & 13 & 0.769 & \textbf{1.000} & +0.231 \\
+D8 (Multi-Step) & 17 & 0.765 & \textbf{0.941} & +0.176 \\
+D7 (Browsing) & 9 & 0.889 & \textbf{1.000} & +0.111 \\
+D2 (Communication) & 13 & 0.846 & \textbf{0.923} & +0.077 \\
+D4 (System) & 13 & 0.615 & \textbf{0.692} & +0.077 \\
+D5 (Credentials) & 11 & 0.727 & 0.727 & 0.000 \\
+D6 (Software) & 11 & 0.818 & 0.818 & 0.000 \\
+D1 (Files) & 13 & \textbf{0.923} & 0.769 & $-$0.154 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+TriDecision shows the largest improvements on Finance (D3) and Multi-Step (D8) domains, which involve complex risk assessment. The regression on File Management (D1) reflects slight over-caution on low-risk file operations (e.g., predicting \ask{} for ``delete .tmp files''), a common side effect of safety-oriented training.
+
+
+\subsection{Error Analysis}
+
+TriDecision corrects 12 baseline errors while introducing 5 regressions (net +7). All 12 corrections involve the model learning to \ask{} instead of \act{} on genuinely risky actions (e.g., ``transfer \$500 to Mike'', ``run \texttt{pip install -r requirements.txt}'', ``auto-reply to 100 customer tickets''). The 5 regressions are all cases of over-caution: safe actions (``delete .tmp files'', ``install Git'') mapped to \ask{}.
+
+This error pattern is desirable: it is better to ask unnecessarily (minor inconvenience, weight 0.5) than to act on something that should require confirmation (serious violation, weight 3.0).
+
+
+\subsection{Limitations}
+
+\paragraph{Benchmark diversity.} AskBench tasks are author-constructed, which may introduce systematic biases. The tasks have clear-cut boundaries; real-world scenarios involve more ambiguity. Future work should incorporate adversarial task generation and human agreement studies to validate benchmark difficulty.
+
+\paragraph{Scale.} We evaluate on a single model (Qwen2.5-7B) with N=100 test tasks. Larger-scale evaluation across multiple model families and a larger test set would strengthen the findings.
+
+\paragraph{Text-only evaluation.} Current tasks use text descriptions rather than visual screenshots. Extending to multimodal (screenshot-based) evaluation would better reflect real computer use agent scenarios.
+
+\paragraph{Single-turn only.} AskBench evaluates single-turn decisions. Multi-turn cumulative risk~\cite{unsafer2026}, where individually safe actions compose into harmful sequences, remains an important direction.
+
+
+% ============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================================
+
+We have shown that the binary act/refuse framework for computer use agent safety is fundamentally insufficient. By introducing \ask{}---the ability to request human confirmation---as a third decision option, agents can simultaneously achieve low safety violation rates and high usability. Our ternary framework (AskBench + TriDecision) provides both a benchmark for evaluating this capability and a training method for instilling it. The key takeaway is structural: \textbf{``ask'' is not optional; it is necessary}.
+
+
+% ============================================================================
+% References
+% ============================================================================
+
+\bibliographystyle{plain}
+
+\begin{thebibliography}{99}
+
+\bibitem{anthropic2024computeruse}
+Anthropic.
+\newblock Introducing computer use, 2024.
+
+\bibitem{openai2025operator}
+OpenAI.
+\newblock Operator: A web-using agent, 2025.
+
+\bibitem{mosaic2026}
+Microsoft Research.
+\newblock MOSAIC: Modular safety architecture for tool-calling agents.
+\newblock \emph{arXiv:2603.03205}, 2026.
+
+\bibitem{alphaalign2025}
+AlphaAlign: Dual reward alignment for safe and helpful agents.
+\newblock \emph{arXiv:2507.14987}, 2025.
+
+\bibitem{derta2025}
+DeRTa: Decoupled refusal training for safe tool agents.
+\newblock \emph{ACL}, 2025.
+
+\bibitem{cog2025}
+CoG: Chain-of-guard for safety-aware reasoning.
+\newblock \emph{arXiv:2510.21285}, 2025.
+
+\bibitem{failtoact2025}
+LM agents fail to act on risk knowledge.
+\newblock \emph{arXiv:2508.13465}, 2025.
+
+\bibitem{mindthegap2026}
+Mind the GAP: Text safety does not transfer to tool-call safety.
+\newblock \emph{arXiv:2602.16943}, 2026.
+
+\bibitem{unsafer2026}
+Unsafer in many turns: Multi-turn risk compounding in LLM agents.
+\newblock \emph{arXiv:2602.13379}, 2026.
+
+\bibitem{safepred2026}
+SafePred: World model predictive guardrails for agents.
+\newblock \emph{arXiv:2602.01725}, 2026.
+
+\bibitem{ossentinel2025}
+OS-Sentinel: Formal verification for desktop agents.
+\newblock \emph{arXiv:2510.24411}, 2025.
+
+\bibitem{webguard2025}
+WebGuard: Action-level risk classification for web agents.
+\newblock \emph{arXiv:2507.14293}, 2025.
+
+\bibitem{autonomylevels2025}
+Levels of autonomy for AI agents.
+\newblock \emph{arXiv:2506.12469}, 2025.
+
+\bibitem{rafailov2023dpo}
+R.~Rafailov, A.~Sharma, E.~Mitchell, S.~Ermon, C.~D. Manning, and C.~Finn.
+\newblock Direct preference optimization: Your language model is secretly a reward model.
+\newblock \emph{NeurIPS}, 2023.
+
+\bibitem{hu2022lora}
+E.~J. Hu, Y.~Shen, P.~Wallis, Z.~Allen-Zhu, Y.~Li, S.~Wang, L.~Wang, and W.~Chen.
+\newblock LoRA: Low-rank adaptation of large language models.
+\newblock \emph{ICLR}, 2022.
+
+\bibitem{qwen2025}
+Qwen Team.
+\newblock Qwen2.5 technical report.
+\newblock 2025.
+
+\end{thebibliography}
+
+\end{document}

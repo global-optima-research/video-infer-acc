@@ -180,8 +180,13 @@ def call_transformers_local(messages: list[dict], model: str) -> str:
         )
         print(f"  Model loaded.")
 
+    # Disable thinking mode for Qwen 3.5 by adding /no_think
+    chat_messages = list(messages)
+    if "qwen3" in model.lower():
+        chat_messages = [messages[0]] + [{"role": "user", "content": "/no_think\n" + messages[1]["content"]}] + messages[2:]
+
     text = _hf_tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
+        chat_messages, tokenize=False, add_generation_prompt=True
     )
     inputs = _hf_tokenizer(text, return_tensors="pt").to(_hf_model.device)
 
@@ -189,7 +194,7 @@ def call_transformers_local(messages: list[dict], model: str) -> str:
     with torch.no_grad():
         outputs = _hf_model.generate(
             **inputs,
-            max_new_tokens=300,
+            max_new_tokens=800,
             do_sample=False,
             temperature=None,
             top_p=None,

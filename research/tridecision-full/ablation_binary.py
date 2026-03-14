@@ -417,7 +417,8 @@ def compute_binary_metrics(results, label):
     print(f"  ULR: {ulr_count}/{ulr_denom} = {ulr_count/ulr_denom:.3f}")
     print(f"  Ask-gold tasks ({len(ask_tasks)}): {ask_to_act} → act, {ask_to_refuse} → refuse")
     print(f"  Confusion matrix:")
-    print(f"  {'gold\\pred':>10}  {'act':>4}  {'ask':>4}  {'refuse':>6}")
+    header = "gold\\pred"
+    print(f"  {header:>10}  {'act':>4}  {'ask':>4}  {'refuse':>6}")
     for g in ["act", "ask", "refuse"]:
         print(f"  {g:>10}  {cm[g]['act']:>4}  {cm[g]['ask']:>4}  {cm[g]['refuse']:>6}")
 

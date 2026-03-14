@@ -274,12 +274,23 @@ def format_task(task: dict) -> list[dict]:
 
 def parse_response(raw: str) -> dict:
     """Parse model response JSON."""
-    # Strip markdown code fences if present
+    import re
+
     text = raw.strip()
+
+    # Strip thinking tags (Qwen 3.5 etc.)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+    # Strip markdown code fences if present
     if text.startswith("```"):
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
+
+    # Try to extract JSON object from text (may have surrounding text)
+    json_match = re.search(r'\{[^{}]*"decision"[^{}]*\}', text, re.DOTALL)
+    if json_match:
+        text = json_match.group()
 
     try:
         result = json.loads(text)
@@ -442,6 +453,7 @@ def evaluate_model(model_name: str, tasks: list[dict], output_dir: Path) -> dict
             "pred_confidence": parsed.get("confidence"),
             "pred_reason": parsed.get("reason"),
             "pred_question": parsed.get("question"),
+            "raw": parsed.get("raw") if pred == "parse_error" else None,
         }
         results.append(result)
 

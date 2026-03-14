@@ -69,7 +69,7 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -101,7 +101,6 @@ def main():
         learning_rate=LEARNING_RATE,
         beta=BETA,
         max_length=MAX_LENGTH,
-        max_prompt_length=MAX_PROMPT_LENGTH,
         bf16=True,
         gradient_checkpointing=True,
         logging_steps=5,

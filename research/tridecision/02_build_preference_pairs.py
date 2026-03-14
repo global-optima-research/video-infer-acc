@@ -59,12 +59,17 @@ Pending action: {pending_action}
 What is your decision?"""
 
 
-def build_prompt(task):
-    return SYSTEM_PROMPT + "\n\n" + USER_TEMPLATE.format(
+def build_prompt_messages(task):
+    """Build chat messages for the prompt (used by TRL with chat template)."""
+    user_msg = USER_TEMPLATE.format(
         context=task["context"],
         instruction=task["instruction"],
         pending_action=task["pending_action"],
     )
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_msg},
+    ]
 
 
 def main():
@@ -83,7 +88,7 @@ def main():
         task_id = entry["task_id"]
         gold = entry["gold_label"]
         task = task_map[task_id]
-        prompt = build_prompt(task)
+        prompt = build_prompt_messages(task)
 
         chosen_response = entry["forced_responses"][gold]
 

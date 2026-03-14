@@ -44,14 +44,18 @@ LORA_DROPOUT = 0.05
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 
-def load_preference_data():
+def load_preference_data(tokenizer):
     with open(PAIRS_PATH) as f:
         pairs = json.load(f)
 
     records = []
     for pair in pairs:
+        # prompt is a list of chat messages — apply chat template
+        prompt_text = tokenizer.apply_chat_template(
+            pair["prompt"], tokenize=False, add_generation_prompt=True
+        )
         records.append({
-            "prompt": pair["prompt"],
+            "prompt": prompt_text,
             "chosen": pair["chosen"],
             "rejected": pair["rejected"],
         })
@@ -85,7 +89,7 @@ def main():
     )
 
     # Load data
-    dataset = load_preference_data()
+    dataset = load_preference_data(tokenizer)
 
     # Split: 80% train, 20% eval (for such small data, mainly for sanity check)
     split = dataset.train_test_split(test_size=0.2, seed=42)

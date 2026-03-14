@@ -230,7 +230,7 @@ MODEL_CONFIGS = {
     },
     "qwen3.5-9b-local": {
         "backend": "transformers",
-        "model_id": "Qwen/Qwen3.5-9B-Instruct",
+        "model_id": "Qwen/Qwen3.5-9B",
     },
 }
 

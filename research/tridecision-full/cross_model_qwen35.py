@@ -301,7 +301,6 @@ def step3_train(pairs_path):
         learning_rate=LEARNING_RATE,
         beta=BETA,
         max_length=MAX_LENGTH,
-        max_prompt_length=MAX_PROMPT_LENGTH,
         bf16=True,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
